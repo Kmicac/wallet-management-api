@@ -41,6 +41,48 @@ export class WalletController {
     }
   };
 
+  getWalletsPaginated = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+
+      if (!userId) {
+        res.status(401).json({
+          success: false,
+          message: 'Unauthorized',
+        });
+        return;
+      }
+
+      const {
+        page = 1,
+        limit = 10,
+        sortBy = 'createdAt',
+        sortOrder = 'DESC',
+        chain,
+        search,
+        tag,
+      } = req.query;
+
+      const result = await this.walletService.getWalletsPaginated(userId, {
+        page: Number(page),
+        limit: Number(limit),
+        sortBy: sortBy as string,
+        sortOrder: sortOrder as 'ASC' | 'DESC',
+        chain: chain as string,
+        search: search as string,
+        tag: tag as string,
+      });
+
+      res.status(200).json(result);
+    } catch (error) {
+      logger.error('Error in getWalletsPaginated controller:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+      });
+    }
+  };
+
   getWalletById = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;

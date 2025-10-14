@@ -1,12 +1,11 @@
 import { Router } from 'express';
-import { AuthController } from '../controllers/auth.controller';
-import { authenticate } from '../middlewares/auth.middleware';
+import { AuthController } from '@/controllers/auth.controller';
+import { authenticate } from '@/middlewares/auth.middleware';
 import rateLimit from 'express-rate-limit';
 
 const router = Router();
 const authController = new AuthController();
 
-// Rate limiter for auth endpoints
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
   max: 5, 
@@ -15,11 +14,10 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Public routes
 router.post('/signup', authLimiter, authController.signUp);
 router.post('/signin', authLimiter, authController.signIn);
+router.post('/refresh', authLimiter, authController.refreshToken);
 
-// Protected routes
 router.post('/signout', authenticate, authController.signOut);
 
 export default router;

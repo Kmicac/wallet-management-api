@@ -8,7 +8,6 @@ export const validateEnv = (): void => {
     }),
     PORT: num({ default: 3000 }),
 
-    // Database
     DB_HOST: str(),
     DB_PORT: num({ default: 5433 }),
     DB_USERNAME: str(),
@@ -20,7 +19,12 @@ export const validateEnv = (): void => {
     DB_POOL_MIN: num({ default: 2 }),
     DB_POOL_MAX: num({ default: 10 }),
 
-    // JWT - Validación de longitud se hará manualmente después
+    REDIS_HOST: str({ default: 'localhost' }),
+    REDIS_PORT: num({ default: 6379 }),
+    REDIS_PASSWORD: str({ default: '' }),
+    REDIS_DB: num({ default: 0 }),
+    REDIS_ENABLED: bool({ default: false }),
+
     JWT_SECRET: str(),
     JWT_REFRESH_SECRET: str(),
     JWT_EXPIRES_IN: str({ default: '15m' }),
@@ -29,15 +33,12 @@ export const validateEnv = (): void => {
     // Security
     BCRYPT_ROUNDS: num({ default: 12 }),
 
-    // Rate Limiting
     RATE_LIMIT_WINDOW_MS: num({ default: 900000 }),
     RATE_LIMIT_MAX_REQUESTS: num({ default: 100 }),
 
-    // CORS
     CORS_ORIGIN: str(),
     CORS_CREDENTIALS: bool({ default: true }),
 
-    // Logging
     LOG_LEVEL: str({
       choices: ['error', 'warn', 'info', 'http', 'debug'],
       default: 'info',
@@ -46,12 +47,10 @@ export const validateEnv = (): void => {
     LOG_MAX_FILES: str({ default: '14d' }),
     LOG_MAX_SIZE: str({ default: '20m' }),
 
-    // Swagger
     SWAGGER_ENABLED: bool({ default: true }),
     SWAGGER_PATH: str({ default: '/api-docs' }),
   });
 
-  // Validación manual de longitud de secrets
   if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
     throw new Error('JWT_SECRET must be at least 32 characters long');
   }
@@ -77,6 +76,14 @@ export const env = {
     ssl: process.env.DB_SSL === 'true',
     poolMin: parseInt(process.env.DB_POOL_MIN || '2', 10),
     poolMax: parseInt(process.env.DB_POOL_MAX || '10', 10),
+  },
+
+  redis: {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379', 10),
+    password: process.env.REDIS_PASSWORD || undefined,
+    db: parseInt(process.env.REDIS_DB || '0', 10),
+    enabled: process.env.REDIS_ENABLED === 'true',
   },
 
   jwt: {

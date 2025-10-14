@@ -20,6 +20,67 @@ export class WalletService {
     }
   }
 
+  async getWalletsPaginated(
+    userId: string,
+    query: {
+      page?: number;
+      limit?: number;
+      sortBy?: string;
+      sortOrder?: 'ASC' | 'DESC';
+      chain?: string;
+      search?: string;
+      tag?: string;
+    }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    data: WalletResponse[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasNext: boolean;
+      hasPrev: boolean;
+    };
+  }> {
+    try {
+      const { page = 1, limit = 10, sortBy, sortOrder, chain, search, tag } = query;
+
+      const skip = (page - 1) * limit;
+
+      const { wallets, total } = await this.walletRepository.findAllPaginated({
+        userId,
+        skip,
+        take: limit,
+        sortBy,
+        sortOrder,
+        chain,
+        search,
+        tag,
+      });
+
+      const totalPages = Math.ceil(total / limit);
+
+      return {
+        success: true,
+        message: 'Wallets retrieved successfully',
+        data: wallets.map((wallet) => this.mapToResponse(wallet)),
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1,
+        },
+      };
+    } catch (error) {
+      logger.error('Error fetching paginated wallets:', error);
+      throw new Error('Error fetching wallets');
+    }
+  }
+
   async getWalletById(id: string, userId: string): Promise<WalletResponse | null> {
     try {
       const wallet = await this.walletRepository.findByIdAndUserId(id, userId);
@@ -40,17 +101,31 @@ export class WalletService {
     dto: CreateWalletDto
   ): Promise<{ success: boolean; message: string; data?: WalletResponse }> {
     try {
-      // Validate blockchain address
+      // Validate blockchain chain is supported
+      if (!BlockchainValidator.isSupportedChain(dto.chain)) {
+        return {
+          success: false,
+          message: `Unsupported blockchain: ${dto.chain}`,
+        };
+      }
+
+      // Validate blockchain address with detailed feedback
       const validation = BlockchainValidator.validateAddress(dto.chain, dto.address);
       if (!validation.valid) {
         return {
           success: false,
-          message: validation.message || 'Invalid wallet address',
+          message: validation.message,
         };
       }
 
+      // Normalize address (checksum for EVM chains)
+      const normalizedAddress = BlockchainValidator.normalizeAddress(
+        dto.chain,
+        dto.address
+      );
+
       // Check if address already exists
-      const existingWallet = await this.walletRepository.existsByAddress(dto.address);
+      const existingWallet = await this.walletRepository.existsByAddress(normalizedAddress);
       if (existingWallet) {
         return {
           success: false,
@@ -58,15 +133,19 @@ export class WalletService {
         };
       }
 
-      // Create wallet
+      // Create wallet with normalized address
       const wallet = await this.walletRepository.create(
         userId,
         dto.chain,
-        dto.address,
+        normalizedAddress,
         dto.tag
       );
 
-      logger.info(`Wallet created successfully: ${wallet.id} for user: ${userId}`);
+      logger.info(`Wallet created successfully: ${wallet.id} for user: ${userId}`, {
+        chain: dto.chain,
+        address: normalizedAddress,
+        explorerUrl: BlockchainValidator.getExplorerUrl(dto.chain, normalizedAddress),
+      });
 
       return {
         success: true,
@@ -94,15 +173,46 @@ export class WalletService {
         };
       }
 
-      // Validate blockchain address if provided
+      // If updating chain, validate it's supported
+      if (dto.chain && !BlockchainValidator.isSupportedChain(dto.chain)) {
+        return {
+          success: false,
+          message: `Unsupported blockchain: ${dto.chain}`,
+        };
+      }
+
+      // Validate blockchain address if both chain and address are provided
       if (dto.address && dto.chain) {
         const validation = BlockchainValidator.validateAddress(dto.chain, dto.address);
         if (!validation.valid) {
           return {
             success: false,
-            message: validation.message || 'Invalid wallet address',
+            message: validation.message,
           };
         }
+
+        // Normalize address
+        dto.address = BlockchainValidator.normalizeAddress(dto.chain, dto.address);
+      }
+
+      // If only address is provided, validate against existing chain
+      if (dto.address && !dto.chain) {
+        const validation = BlockchainValidator.validateAddress(
+          existingWallet.chain,
+          dto.address
+        );
+        if (!validation.valid) {
+          return {
+            success: false,
+            message: validation.message,
+          };
+        }
+
+        // Normalize address
+        dto.address = BlockchainValidator.normalizeAddress(
+          existingWallet.chain,
+          dto.address
+        );
       }
 
       // Check if new address already exists (excluding current wallet)
@@ -129,7 +239,9 @@ export class WalletService {
         };
       }
 
-      logger.info(`Wallet updated successfully: ${id}`);
+      logger.info(`Wallet updated successfully: ${id}`, {
+        updates: dto,
+      });
 
       return {
         success: true,
@@ -166,7 +278,10 @@ export class WalletService {
         };
       }
 
-      logger.info(`Wallet deleted successfully: ${id}`);
+      logger.info(`Wallet deleted successfully: ${id}`, {
+        chain: existingWallet.chain,
+        address: existingWallet.address,
+      });
 
       return {
         success: true,

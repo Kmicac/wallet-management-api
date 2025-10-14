@@ -3,6 +3,7 @@ import 'dotenv/config';
 import app from './app';
 import { env, validateEnv } from '@/config/env.config';
 import { initializeDatabase, closeDatabase } from '@/config/database.init';
+import { redisClient } from '@/config/redis.config';
 import { logger } from '@/config/logger.config';
 
 class Server {
@@ -23,6 +24,12 @@ class Server {
       logger.info('🔌 Connecting to database...');
       await initializeDatabase();
 
+      // Initialize Redis
+      if (env.redis.enabled) {
+        logger.info('🔌 Connecting to Redis...');
+        await redisClient.connect();
+      }
+
       // Start server
       app.listen(this.port, () => {
         logger.info('='.repeat(50));
@@ -33,6 +40,9 @@ class Server {
           logger.info(
             `📚 Swagger Docs: http://localhost:${this.port}${env.swagger.path}`
           );
+        }
+        if (env.redis.enabled) {
+          logger.info(`🔴 Redis: ${redisClient.isRedisConnected() ? 'Connected' : 'Disconnected'}`);
         }
         logger.info('='.repeat(50));
       });
@@ -51,6 +61,7 @@ class Server {
 
       try {
         await closeDatabase();
+        await redisClient.disconnect();
         logger.info('✅ Server shut down successfully');
         process.exit(0);
       } catch (error) {
@@ -74,6 +85,5 @@ class Server {
   }
 }
 
-// Start server
 const server = new Server();
 server.start();

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { AuthService } from '@/services/auth.service';
-import { SignInDto, SignUpDto } from '@/dto/auth.dto';
+import { SignInDto, SignUpDto, RefreshTokenDto } from '@/dto/auth.dto';
 import { validate } from 'class-validator';
 import { plainToClass } from 'class-transformer';
 import { logger } from '@/config/logger.config';
@@ -31,18 +31,27 @@ export class AuthController {
       }
 
       const result = await this.authService.signUp(dto);
-
-      if (!result.success) {
-        res.status(400).json(result);
+      res.status(201).json(result);
+    } catch (error: any) {
+      logger.error('Error in signUp controller:', error);
+      
+      if (error.statusCode) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: {
+            code: error.code,
+            message: error.message,
+          },
+        });
         return;
       }
 
-      res.status(201).json(result);
-    } catch (error) {
-      logger.error('Error in signUp controller:', error);
       res.status(500).json({
         success: false,
-        message: 'Internal server error',
+        error: {
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Internal server error',
+        },
       });
     }
   };
@@ -65,18 +74,70 @@ export class AuthController {
       }
 
       const result = await this.authService.signIn(dto);
+      res.status(200).json(result);
+    } catch (error: any) {
+      logger.error('Error in signIn controller:', error);
 
-      if (!result.success) {
-        res.status(401).json(result);
+      if (error.statusCode) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: {
+            code: error.code,
+            message: error.message,
+          },
+        });
         return;
       }
 
-      res.status(200).json(result);
-    } catch (error) {
-      logger.error('Error in signIn controller:', error);
       res.status(500).json({
         success: false,
-        message: 'Internal server error',
+        error: {
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Internal server error',
+        },
+      });
+    }
+  };
+
+  refreshToken = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const dto = plainToClass(RefreshTokenDto, req.body);
+      const errors = await validate(dto);
+
+      if (errors.length > 0) {
+        res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: errors.map((err) => ({
+            field: err.property,
+            constraints: err.constraints,
+          })),
+        });
+        return;
+      }
+
+      const result = await this.authService.refreshToken(dto.refreshToken);
+      res.status(200).json(result);
+    } catch (error: any) {
+      logger.error('Error in refreshToken controller:', error);
+
+      if (error.statusCode) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: {
+            code: error.code,
+            message: error.message,
+          },
+        });
+        return;
+      }
+
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Internal server error',
+        },
       });
     }
   };
@@ -85,22 +146,41 @@ export class AuthController {
     try {
       const authenticatedReq = req as AuthenticatedRequest;
       const userId = authenticatedReq.user?.id;
+      const token = (req as any).token;
 
-      if (!userId) {
+      if (!userId || !token) {
         res.status(401).json({
           success: false,
-          message: 'Unauthorized',
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'Unauthorized',
+          },
         });
         return;
       }
 
-      const result = await this.authService.signOut(userId);
+      const result = await this.authService.signOut(userId, token);
       res.status(200).json(result);
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Error in signOut controller:', error);
+
+      if (error.statusCode) {
+        res.status(error.statusCode).json({
+          success: false,
+          error: {
+            code: error.code,
+            message: error.message,
+          },
+        });
+        return;
+      }
+
       res.status(500).json({
         success: false,
-        message: 'Internal server error',
+        error: {
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Internal server error',
+        },
       });
     }
   };

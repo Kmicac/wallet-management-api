@@ -1,38 +1,81 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '@/config/logger.config';
-
-export interface ApiError extends Error {
-  statusCode?: number;
-  isOperational?: boolean;
-}
+import { AppError } from '@/utils/errors.util';
 
 export const errorHandler = (
-  err: ApiError,
+  err: Error | AppError,
   req: Request,
   res: Response,
   _next: NextFunction
 ): void => {
-  const statusCode = err.statusCode || 500;
-  const message = err.message || 'Internal Server Error';
+  let statusCode = 500;
+  let message = 'Internal Server Error';
+  let code = 'INTERNAL_SERVER_ERROR';
+  let details: any = undefined;
+  let isOperational = false;
 
-  logger.error(`Error: ${message}`, {
+  // Check if error is an AppError instance
+  if (err instanceof AppError) {
+    statusCode = err.statusCode;
+    message = err.message;
+    code = err.code || 'UNKNOWN_ERROR';
+    details = err.details;
+    isOperational = err.isOperational;
+  } else {
+    message = err.message || message;
+  }
+
+  const errorLog = {
     statusCode,
-    path: req.path,
-    method: req.method,
-    ip: req.ip,
-    stack: err.stack,
-  });
-
-  res.status(statusCode).json({
-    success: false,
+    code,
     message,
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
-  });
+    method: req.method,
+    path: req.path,
+    ip: req.ip,
+    userAgent: req.get('user-agent'),
+    ...(details && { details }),
+  };
+
+  if (statusCode >= 500) {
+    logger.error('Server Error:', { ...errorLog, stack: err.stack });
+  } else if (statusCode >= 400) {
+    logger.warn('Client Error:', errorLog);
+  }
+
+  const response: any = {
+    success: false,
+    error: {
+      code,
+      message,
+    },
+  };
+
+  if (details && (process.env.NODE_ENV === 'development' || isOperational)) {
+    response.error.details = details;
+  }
+
+  if (process.env.NODE_ENV === 'development' && err.stack) {
+    response.error.stack = err.stack;
+  }
+
+  res.status(statusCode).json(response);
 };
 
 export const notFoundHandler = (req: Request, res: Response): void => {
   res.status(404).json({
     success: false,
-    message: `Route ${req.originalUrl} not found`,
+    error: {
+      code: 'NOT_FOUND',
+      message: `Route ${req.method} ${req.originalUrl} not found`,
+    },
   });
+};
+
+//  Async handler wrapper to catch errors in async route handlers
+export const asyncHandler = (
+  fn: (req: Request, res: Response, next: NextFunction) => Promise<any>
+) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
 };

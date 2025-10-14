@@ -18,6 +18,11 @@ export class SignUpDto {
   password!: string;
 }
 
+export class RefreshTokenDto {
+  @IsString()
+  refreshToken!: string;
+}
+
 export interface AuthResponse {
   success: boolean;
   message: string;
@@ -27,6 +32,15 @@ export interface AuthResponse {
       email: string;
     };
     token: string;
-    refreshToken?: string;
+    refreshToken: string;
+  };
+}
+
+export interface RefreshTokenResponse {
+  success: boolean;
+  message: string;
+  data?: {
+    token: string;
+    refreshToken: string;
   };
 }
