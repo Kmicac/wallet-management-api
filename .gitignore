@@ -8,6 +8,7 @@ pnpm-debug.log*
 
 # Environment
 .env
+.env.test
 .env.local
 .env.*.local
 .env.production
@@ -44,4 +45,3 @@ temp/
 # Security audit reports
 security-audit.json
 
-.npmrc

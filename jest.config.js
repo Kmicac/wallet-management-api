@@ -11,9 +11,19 @@ module.exports = {
     '!src/**/*.d.ts',
     '!src/**/*.interface.ts',
     '!src/server.ts',
+    '!src/migrations/**',
+    '!src/app.ts',
   ],
   coverageDirectory: 'coverage',
-  coverageReporters: ['text', 'lcov', 'html'],
+  coverageReporters: ['text', 'lcov', 'html', 'json-summary'],
+  // coverageThreshold: {
+  //   global: {
+  //     branches: 50,   
+  //     functions: 50,  
+  //     lines: 50,      
+  //     statements: 50, 
+  //   },
+  // },
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^@config/(.*)$': '<rootDir>/src/config/$1',
@@ -30,4 +40,8 @@ module.exports = {
     '^@interfaces/(.*)$': '<rootDir>/src/interfaces/$1',
   },
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
+  testTimeout: 10000,
+  verbose: true,
+  bail: false,
+  maxWorkers: '50%',
 };

@@ -1,0 +1,34 @@
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: wallet-api-test-db
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_pass_12345
+      POSTGRES_DB: wallet_test
+    ports:
+      - "5434:5432"  
+    tmpfs:
+      - /var/lib/postgresql/data  
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d wallet_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - test-network
+
+  redis-test:
+    image: redis:7-alpine
+    container_name: wallet-api-test-redis
+    ports:
+      - "6380:6379"  
+    tmpfs:
+      - /data 
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

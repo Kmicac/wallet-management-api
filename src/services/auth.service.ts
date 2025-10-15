@@ -24,19 +24,15 @@ export class AuthService {
 
   async signUp(dto: SignUpDto): Promise<AuthResponse> {
     try {
-      // Check if user already exists
       const existingUser = await this.userRepository.existsByEmail(dto.email);
       if (existingUser) {
         throw new ConflictError('User with this email already exists');
       }
 
-      // Hash password
       const hashedPassword = await PasswordUtil.hash(dto.password);
 
-      // Create user
       const user = await this.userRepository.create(dto.email, hashedPassword);
 
-      // Generate tokens
       const payload: JwtPayload = {
         userId: user.id,
         email: user.email,
@@ -45,7 +41,6 @@ export class AuthService {
       const token = JwtUtil.generateToken(payload);
       const refreshToken = JwtUtil.generateRefreshToken(payload);
 
-      // Store refresh token
       await this.refreshTokenService.storeRefreshToken(user.id, refreshToken);
 
       logger.info(`User registered successfully: ${user.email}`);
@@ -73,20 +68,17 @@ export class AuthService {
 
   async signIn(dto: SignInDto): Promise<AuthResponse> {
     try {
-      // Find user by email
       const user = await this.userRepository.findByEmail(dto.email);
       if (!user) {
         throw new UnauthorizedError('Invalid email or password');
       }
 
-      // Verify password
       const isPasswordValid = await PasswordUtil.compare(dto.password, user.password);
       if (!isPasswordValid) {
         logger.warn(`Failed login attempt for email: ${dto.email}`);
         throw new UnauthorizedError('Invalid email or password');
       }
 
-      // Generate tokens
       const payload: JwtPayload = {
         userId: user.id,
         email: user.email,
@@ -95,7 +87,6 @@ export class AuthService {
       const token = JwtUtil.generateToken(payload);
       const refreshToken = JwtUtil.generateRefreshToken(payload);
 
-      // Store refresh token
       await this.refreshTokenService.storeRefreshToken(user.id, refreshToken);
 
       logger.info(`User signed in successfully: ${user.email}`);
@@ -123,14 +114,12 @@ export class AuthService {
 
   async refreshToken(oldRefreshToken: string): Promise<RefreshTokenResponse> {
     try {
-      // Verify refresh token exists in Redis
       const userId = await this.refreshTokenService.verifyRefreshToken(oldRefreshToken);
       
       if (!userId) {
         throw new UnauthorizedError('Invalid or expired refresh token');
       }
 
-      // Verify refresh token signature
       let payload: JwtPayload;
       try {
         payload = JwtUtil.verifyRefreshToken(oldRefreshToken);
@@ -138,18 +127,15 @@ export class AuthService {
         throw new UnauthorizedError('Invalid refresh token signature');
       }
 
-      // Verify userId matches
       if (payload.userId !== userId) {
         throw new UnauthorizedError('Token user mismatch');
       }
 
-      // Get user from database
       const user = await this.userRepository.findById(userId);
       if (!user) {
         throw new UnauthorizedError('User not found');
       }
 
-      // Generate new tokens
       const newPayload: JwtPayload = {
         userId: user.id,
         email: user.email,
@@ -186,10 +172,8 @@ export class AuthService {
 
   async signOut(userId: string, token: string): Promise<{ success: boolean; message: string }> {
     try {
-      // Add access token to blacklist
       await this.tokenBlacklistService.addToBlacklist(token);
 
-      // Revoke all refresh tokens for this user
       await this.refreshTokenService.revokeAllUserTokens(userId);
 
       logger.info(`User signed out: ${userId}`);
