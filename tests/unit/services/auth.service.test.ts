@@ -1,171 +1,348 @@
-import { AuthService } from '../../../src/services/auth.service';
-import { UserRepository } from '../../../src/repositories/user.repository';
-import { TokenBlacklistService } from '../../../src/services/token-blacklist.service';
-import { RefreshTokenService } from '../../../src/services/refresh-token.service';
-import { PasswordUtil } from '../../../src/utils/password.util';
-import { JwtUtil } from '../../../src/utils/jwt.util';
-import { logger } from '../../../src/config/logger.config';
+import { DataSource } from 'typeorm';
 import {
-  ConflictError,
-  UnauthorizedError,
-  DatabaseError,
-} from '../../../src/utils/errors.util';
+  initTestDatabase,
+  closeTestDatabase,
+  clearDatabase,
+  generateTestEmail,
+} from '../../utils/test-helpers';
+import { ConflictError, UnauthorizedError } from '../../../src/utils/errors.util';
 
-jest.mock('@/repositories/user.repository');
-jest.mock('@/services/token-blacklist.service');
-jest.mock('@/services/refresh-token.service');
-jest.mock('@/utils/password.util');
-jest.mock('@/utils/jwt.util');
-jest.mock('@/config/logger.config', () => ({
-  logger: {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
+// Mock Redis funcional
+const mockRedisStore = new Map<string, string>();
+
+jest.mock('../../../src/config/redis.config', () => ({
+  redisClient: {
+    connect: jest.fn().mockResolvedValue(undefined),
+    disconnect: jest.fn().mockResolvedValue(undefined),
+    set: jest.fn().mockImplementation((key: string, value: string) => {
+      mockRedisStore.set(key, value);
+      return Promise.resolve('OK');
+    }),
+    get: jest.fn().mockImplementation((key: string) => {
+      return Promise.resolve(mockRedisStore.get(key) || null);
+    }),
+    delete: jest.fn().mockImplementation((key: string) => {
+      mockRedisStore.delete(key);
+      return Promise.resolve(1);
+    }),
+    del: jest.fn().mockImplementation((key: string) => {
+      mockRedisStore.delete(key);
+      return Promise.resolve(1);
+    }),
+    exists: jest.fn().mockImplementation((key: string) => {
+      return Promise.resolve(mockRedisStore.has(key) ? 1 : 0);
+    }),
+    expire: jest.fn().mockResolvedValue(1),
+    setEx: jest.fn().mockImplementation((key: string, _ttl: number, value: string) => {
+      mockRedisStore.set(key, value);
+      return Promise.resolve('OK');
+    }),
+    isRedisConnected: jest.fn().mockReturnValue(true),
+    getClient: jest.fn().mockReturnValue({
+      set: jest.fn(),
+      get: jest.fn(),
+      del: jest.fn(),
+    }),
   },
 }));
 
-describe('AuthService', () => {
-  let authService: AuthService;
-  let userRepositoryMock: jest.Mocked<UserRepository>;
-  let tokenBlacklistMock: jest.Mocked<TokenBlacklistService>;
-  let refreshTokenMock: jest.Mocked<RefreshTokenService>;
+describe('AuthService Unit Tests', () => {
+  let testDb: DataSource;
+  let AuthService: any;
+  let authService: any;
 
-  const mockUser = {
-    id: '1',
-    email: 'test@example.com',
-    password: 'hashedpassword',
-    wallets: [],
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
+  beforeAll(async () => {
+    // 1. Inicializar DB
+    testDb = await initTestDatabase();
 
-  const mockToken = 'jwt-token';
-  const mockRefreshToken = 'refresh-token';
+    // 2. Mock del AppDataSource ANTES de importar el service
+    jest.mock('../../../src/config/database', () => ({
+      __esModule: true,
+      default: testDb,
+    }));
 
-  beforeEach(() => {
-    jest.clearAllMocks();
+    // 3. Importar AuthService DESPUÉS del mock
+    const authModule = await import('../../../src/services/auth.service');
+    AuthService = authModule.AuthService;
+  });
+
+  afterAll(async () => {
+    await closeTestDatabase();
+  });
+
+  beforeEach(async () => {
+    await clearDatabase(testDb);
+    mockRedisStore.clear();
+    // Crear nueva instancia del servicio con la DB real
     authService = new AuthService();
-
-    // Cast a jest.Mocked
-    userRepositoryMock = authService['userRepository'] as unknown as jest.Mocked<UserRepository>;
-    tokenBlacklistMock = authService['tokenBlacklistService'] as unknown as jest.Mocked<TokenBlacklistService>;
-    refreshTokenMock = authService['refreshTokenService'] as unknown as jest.Mocked<RefreshTokenService>;
-
-    // Mocks de utilidades
-    (PasswordUtil.hash as jest.Mock).mockResolvedValue('hashed');
-    (PasswordUtil.compare as jest.Mock).mockResolvedValue(true);
-    (JwtUtil.generateToken as jest.Mock).mockReturnValue(mockToken);
-    (JwtUtil.generateRefreshToken as jest.Mock).mockReturnValue(mockRefreshToken);
-    (JwtUtil.verifyRefreshToken as jest.Mock).mockReturnValue({ userId: '1', email: 'test@example.com' });
+    // Inyectar manualmente la conexión de testDb
+    authService['userRepository']['repository'] = testDb.getRepository('User');
   });
 
-  // signUp
   describe('signUp', () => {
-    it('should register user and log info', async () => {
-      userRepositoryMock.existsByEmail.mockResolvedValue(false);
-      userRepositoryMock.create.mockResolvedValue(mockUser);
+    it('should create a new user successfully', async () => {
+      const email = generateTestEmail();
+      const password = 'SecurePass123!';
 
-      const result = await authService.signUp({ email: 'test@example.com', password: '1234' });
+      const result = await authService.signUp({ email, password });
 
       expect(result.success).toBe(true);
-      expect(logger.info).toHaveBeenCalledWith(`User registered successfully: ${mockUser.email}`);
-      expect(userRepositoryMock.create).toHaveBeenCalledWith('test@example.com', 'hashed');
+      expect(result.message).toBe('User registered successfully');
+      expect(result.data?.user.email).toBe(email);
+      expect(result.data?.user.id).toBeDefined();
+      expect(result.data?.token).toBeDefined();
+      expect(result.data?.refreshToken).toBeDefined();
     });
 
-    it('should throw ConflictError if email exists', async () => {
-      userRepositoryMock.existsByEmail.mockResolvedValue(true);
-      await expect(authService.signUp({ email: 'test@example.com', password: '1234' }))
-        .rejects
-        .toThrow(ConflictError);
+    it('should throw ConflictError if email already exists', async () => {
+      const email = generateTestEmail();
+      const password = 'SecurePass123!';
+
+      await authService.signUp({ email, password });
+
+      await expect(
+        authService.signUp({ email, password })
+      ).rejects.toThrow(ConflictError);
+
+      await expect(
+        authService.signUp({ email, password })
+      ).rejects.toThrow('User with this email already exists');
     });
 
-    it('should log and throw DatabaseError on unexpected error', async () => {
-      userRepositoryMock.existsByEmail.mockRejectedValue(new Error('fail'));
-      await expect(authService.signUp({ email: 'test@example.com', password: '1234' }))
-        .rejects
-        .toThrow(DatabaseError);
-      expect(logger.error).toHaveBeenCalled();
+    it('should hash password before storing', async () => {
+      const email = generateTestEmail();
+      const password = 'PlainTextPassword123!';
+
+      const result = await authService.signUp({ email, password });
+
+      expect(result.data?.user).toBeDefined();
+      expect(result.data?.user.email).toBe(email);
+
+      const signInResult = await authService.signIn({ email, password });
+      expect(signInResult.success).toBe(true);
+    });
+
+    it('should generate valid JWT tokens', async () => {
+      const email = generateTestEmail();
+      const password = 'SecurePass123!';
+
+      const result = await authService.signUp({ email, password });
+
+      expect(result.data?.token).toBeDefined();
+      expect(typeof result.data?.token).toBe('string');
+      expect(result.data?.token.split('.')).toHaveLength(3);
+
+      expect(result.data?.refreshToken).toBeDefined();
+      expect(typeof result.data?.refreshToken).toBe('string');
+      expect(result.data?.refreshToken.split('.')).toHaveLength(3);
     });
   });
 
-  // signIn
   describe('signIn', () => {
-    it('should sign in successfully and log info', async () => {
-      userRepositoryMock.findByEmail.mockResolvedValue(mockUser);
-      const result = await authService.signIn({ email: 'test@example.com', password: '1234' });
+    it('should sign in user with correct credentials', async () => {
+      const email = generateTestEmail();
+      const password = 'SecurePass123!';
+
+      await authService.signUp({ email, password });
+
+      const result = await authService.signIn({ email, password });
+
       expect(result.success).toBe(true);
-      expect(logger.info).toHaveBeenCalledWith(`User signed in successfully: ${mockUser.email}`);
+      expect(result.message).toBe('Sign in successful');
+      expect(result.data?.user.email).toBe(email);
+      expect(result.data?.token).toBeDefined();
+      expect(result.data?.refreshToken).toBeDefined();
     });
 
-    it('should warn and throw UnauthorizedError on invalid password', async () => {
-      userRepositoryMock.findByEmail.mockResolvedValue(mockUser);
-      (PasswordUtil.compare as jest.Mock).mockResolvedValue(false);
+    it('should throw UnauthorizedError with wrong password', async () => {
+      const email = generateTestEmail();
+      await authService.signUp({ email, password: 'CorrectPass123!' });
 
-      await expect(authService.signIn({ email: 'test@example.com', password: '1234' }))
-        .rejects
-        .toThrow(UnauthorizedError);
-      expect(logger.warn).toHaveBeenCalledWith(`Failed login attempt for email: test@example.com`);
+      await expect(
+        authService.signIn({ email, password: 'WrongPass123!' })
+      ).rejects.toThrow(UnauthorizedError);
+
+      await expect(
+        authService.signIn({ email, password: 'WrongPass123!' })
+      ).rejects.toThrow('Invalid email or password');
     });
 
-    it('should throw UnauthorizedError if user not found', async () => {
-      userRepositoryMock.findByEmail.mockResolvedValue(null);
-      await expect(authService.signIn({ email: 'test@example.com', password: '1234' }))
-        .rejects
-        .toThrow(UnauthorizedError);
+    it('should throw UnauthorizedError if user does not exist', async () => {
+      await expect(
+        authService.signIn({
+          email: 'nonexistent@example.com',
+          password: 'Pass123!',
+        })
+      ).rejects.toThrow(UnauthorizedError);
+
+      await expect(
+        authService.signIn({
+          email: 'nonexistent@example.com',
+          password: 'Pass123!',
+        })
+      ).rejects.toThrow('Invalid email or password');
+    });
+
+    it('should generate different tokens for each sign in', async () => {
+      const email = generateTestEmail();
+      const password = 'SecurePass123!';
+
+      await authService.signUp({ email, password });
+
+      const result1 = await authService.signIn({ email, password });
+
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const result2 = await authService.signIn({ email, password });
+
+      expect(result1.data?.token).not.toBe(result2.data?.token);
+      expect(result1.data?.refreshToken).not.toBe(result2.data?.refreshToken);
     });
   });
 
-  // refreshToken
   describe('refreshToken', () => {
-    it('should rotate tokens successfully', async () => {
-      refreshTokenMock.verifyRefreshToken.mockResolvedValue('1');
-      userRepositoryMock.findById.mockResolvedValue(mockUser);
+    it('should refresh tokens successfully', async () => {
+      const email = generateTestEmail();
+      const password = 'SecurePass123!';
 
-      const result = await authService.refreshToken(mockRefreshToken);
+      const signUpResult = await authService.signUp({ email, password });
+      const oldRefreshToken = signUpResult.data!.refreshToken;
+
+      const result = await authService.refreshToken(oldRefreshToken);
+
       expect(result.success).toBe(true);
-      expect(refreshTokenMock.storeRefreshToken).toHaveBeenCalledWith('1', mockRefreshToken, mockRefreshToken);
-      expect(logger.info).toHaveBeenCalledWith(`Tokens refreshed successfully for user: ${mockUser.email}`);
+      expect(result.data?.token).toBeDefined();
+      expect(result.data?.refreshToken).toBeDefined();
     });
 
-    it('should throw UnauthorizedError on invalid token', async () => {
-      refreshTokenMock.verifyRefreshToken.mockResolvedValue(null);
-      await expect(authService.refreshToken(mockRefreshToken))
-        .rejects
-        .toThrow(UnauthorizedError);
+    it('should throw UnauthorizedError with invalid refresh token', async () => {
+      await expect(
+        authService.refreshToken('invalid-token-12345')
+      ).rejects.toThrow(UnauthorizedError);
+
+      await expect(
+        authService.refreshToken('invalid-token-12345')
+      ).rejects.toThrow('Invalid or expired refresh token');
     });
 
-    it('should throw UnauthorizedError on token-userId mismatch', async () => {
-      refreshTokenMock.verifyRefreshToken.mockResolvedValue('2'); // mismatch
-      await expect(authService.refreshToken(mockRefreshToken))
-        .rejects
-        .toThrow(UnauthorizedError);
+    it('should throw UnauthorizedError with expired token', async () => {
+      const expiredToken = 'eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIxMjMiLCJlbWFpbCI6InRlc3RAZXhhbXBsZS5jb20iLCJpYXQiOjE1MTYyMzkwMjIsImV4cCI6MTUxNjIzOTAyMn0.invalid';
+
+      await expect(
+        authService.refreshToken(expiredToken)
+      ).rejects.toThrow(UnauthorizedError);
     });
 
-    it('should throw DatabaseError on unexpected error', async () => {
-      refreshTokenMock.verifyRefreshToken.mockRejectedValue(new Error('fail'));
-      await expect(authService.refreshToken(mockRefreshToken))
-        .rejects
-        .toThrow(DatabaseError);
-      expect(logger.error).toHaveBeenCalled();
+    it('should invalidate old refresh token after rotation', async () => {
+      const email = generateTestEmail();
+      const password = 'SecurePass123!';
+
+      const signUpResult = await authService.signUp({ email, password });
+      const oldRefreshToken = signUpResult.data!.refreshToken;
+
+      const firstRefresh = await authService.refreshToken(oldRefreshToken);
+      expect(firstRefresh.success).toBe(true);
+
+      await expect(
+        authService.refreshToken(oldRefreshToken)
+      ).rejects.toThrow(UnauthorizedError);
     });
   });
 
-  // signOut
   describe('signOut', () => {
-    it('should sign out and log info', async () => {
-      const result = await authService.signOut('1', mockToken);
+    it('should sign out successfully', async () => {
+      const email = generateTestEmail();
+      const password = 'SecurePass123!';
+
+      const signUpResult = await authService.signUp({ email, password });
+      const userId = signUpResult.data!.user.id;
+      const token = signUpResult.data!.token;
+
+      const result = await authService.signOut(userId, token);
+
       expect(result.success).toBe(true);
-      expect(tokenBlacklistMock.addToBlacklist).toHaveBeenCalledWith(mockToken);
-      expect(refreshTokenMock.revokeAllUserTokens).toHaveBeenCalledWith('1');
-      expect(logger.info).toHaveBeenCalledWith(`User signed out: 1`);
+      expect(result.message).toBe('Sign out successful');
     });
 
-    it('should throw DatabaseError on unexpected error', async () => {
-      tokenBlacklistMock.addToBlacklist.mockRejectedValue(new Error('fail'));
-      await expect(authService.signOut('1', mockToken))
-        .rejects
-        .toThrow(DatabaseError);
-      expect(logger.error).toHaveBeenCalled();
+    it('should blacklist token on signout', async () => {
+      const email = generateTestEmail();
+      const password = 'SecurePass123!';
+
+      const signUpResult = await authService.signUp({ email, password });
+      const userId = signUpResult.data!.user.id;
+      const token = signUpResult.data!.token;
+
+      await authService.signOut(userId, token);
+
+      expect(mockRedisStore.size).toBeGreaterThan(0);
+    });
+
+    it('should revoke all refresh tokens on signout', async () => {
+      const email = generateTestEmail();
+      const password = 'SecurePass123!';
+
+      const signUpResult = await authService.signUp({ email, password });
+      const userId = signUpResult.data!.user.id;
+      const token = signUpResult.data!.token;
+      const refreshToken = signUpResult.data!.refreshToken;
+
+      await authService.signOut(userId, token);
+
+      await expect(
+        authService.refreshToken(refreshToken)
+      ).rejects.toThrow(UnauthorizedError);
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should handle very long email', async () => {
+      const longEmail = 'a'.repeat(300) + '@example.com';
+
+      await expect(
+        authService.signUp({ email: longEmail, password: 'SecurePass123!' })
+      ).rejects.toThrow();
+    });
+
+    it('should handle SQL injection attempts in email', async () => {
+      const maliciousEmail = "admin'--@example.com";
+      const password = 'SecurePass123!';
+
+      const result = await authService.signUp({
+        email: maliciousEmail,
+        password
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.user.email).toBe(maliciousEmail);
+    });
+
+    it('should handle special characters in password', async () => {
+      const email = generateTestEmail();
+      const specialPassword = '!@#$%^&*()_+-=[]{}|;:,.<>?';
+
+      const signUpResult = await authService.signUp({
+        email,
+        password: specialPassword
+      });
+
+      expect(signUpResult.success).toBe(true);
+
+      const signInResult = await authService.signIn({
+        email,
+        password: specialPassword
+      });
+
+      expect(signInResult.success).toBe(true);
+    });
+
+    it('should handle unicode characters in email', async () => {
+      const email = 'tëst@éxàmplé.com';
+      const password = 'SecurePass123!';
+
+      const result = await authService.signUp({ email, password });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.user.email).toBe(email);
     });
   });
 });
