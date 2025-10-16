@@ -1,19 +1,18 @@
-import 'reflect-metadata';
-import 'dotenv/config';
 import express, { Application } from 'express';
-import cors from 'cors';
 import helmet from 'helmet';
+import cors from 'cors';
+import morgan from 'morgan';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
-import { securityConfig } from '@/config/security.config';
-import { env } from '@/config/env.config';
-import { requestLogger } from '@/middlewares/logger.middleware';
-import { errorHandler, notFoundHandler } from '@/middlewares/error.middleware';
-import routes from '@/routes';
 import swaggerUi from 'swagger-ui-express';
+import rateLimit from 'express-rate-limit';
+import { config } from '@/config/env.config';
 import { swaggerSpec } from '@/config/swagger.config';
+import { errorHandler, notFoundHandler } from '@/middlewares/error.middleware';
+import { requestLogger } from '@/middlewares/logger.middleware';
+import authRoutes from '@/routes/auth.routes';
+import walletRoutes from '@/routes/wallet.routes';
+import { logger } from '@/config/logger.config';
 
 class App {
   public app: Application;
@@ -27,56 +26,85 @@ class App {
   }
 
   private initializeMiddlewares(): void {
-    // Security middlewares
-    this.app.use(helmet(securityConfig.helmet));
-    this.app.use(cors(securityConfig.cors));
+    // Security middleware
+    this.app.use(helmet());
 
-    // Body parsing middlewares
+    // CORS configuration
+    this.app.use(
+      cors({
+        origin: config.security.cors.origin,
+        credentials: config.security.cors.credentials,
+      })
+    );
+
+    this.app.use(compression());
+
+    // Body parsers
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
     this.app.use(cookieParser());
 
-    // Compression
-    this.app.use(compression());
-
     // Logging
-    if (env.node_env === 'development') {
+    if (config.isDevelopment) {
       this.app.use(morgan('dev'));
     }
     this.app.use(requestLogger);
 
-    // Rate limiting
-    const limiter = rateLimit(securityConfig.rateLimit);
+    // Global rate limiting
+    const limiter = rateLimit({
+      windowMs: config.rateLimit.windowMs,
+      max: config.rateLimit.maxRequests,
+      message: {
+        success: false,
+        error: {
+          code: 'RATE_LIMIT_EXCEEDED',
+          message: 'Too many requests. Please try again later.',
+        },
+      },
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
     this.app.use(limiter);
-
-    // Trust proxy
-    this.app.set('trust proxy', 1);
   }
 
   private initializeRoutes(): void {
-    // API routes
-    this.app.use(env.apiPrefix, routes);
 
-    // Root route
+    this.app.get('/health', (_req, res) => {
+      res.json({
+        success: true,
+        message: 'API is running',
+        timestamp: new Date().toISOString(),
+        environment: config.node_env,
+        version: process.env.npm_package_version || '1.0.0',
+      });
+    });
+
+    // API routes
+    this.app.use(`${config.apiPrefix}/auth`, authRoutes);
+    this.app.use(`${config.apiPrefix}/wallets`, walletRoutes);
+
+    // Root endpoint with API info
     this.app.get('/', (_req, res) => {
-      res.status(200).json({
+      res.json({
         success: true,
         message: 'Wallet Management API',
-        version: '1.0.0',
+        version: process.env.npm_package_version || '1.0.0',
+        documentation: config.swagger.enabled ? config.swagger.path : 'disabled',
         endpoints: {
-          health: `${env.apiPrefix}/health`,
-          docs: env.swagger.enabled ? env.swagger.path : 'disabled',
+          health: '/health',
+          swagger: config.swagger.enabled ? config.swagger.path : 'disabled',
           auth: {
-            signup: `${env.apiPrefix}/auth/signup`,
-            signin: `${env.apiPrefix}/auth/signin`,
-            signout: `${env.apiPrefix}/auth/signout`,
+            signup: `${config.apiPrefix}/auth/signup`,
+            signin: `${config.apiPrefix}/auth/signin`,
+            signout: `${config.apiPrefix}/auth/signout`,
+            refresh: `${config.apiPrefix}/auth/refresh`,
           },
           wallets: {
-            getAll: `${env.apiPrefix}/wallets`,
-            create: `${env.apiPrefix}/wallets`,
-            getById: `${env.apiPrefix}/wallets/:id`,
-            update: `${env.apiPrefix}/wallets/:id`,
-            delete: `${env.apiPrefix}/wallets/:id`,
+            getAll: `${config.apiPrefix}/wallets`,
+            create: `${config.apiPrefix}/wallets`,
+            getById: `${config.apiPrefix}/wallets/:id`,
+            update: `${config.apiPrefix}/wallets/:id`,
+            delete: `${config.apiPrefix}/wallets/:id`,
           },
         },
       });
@@ -84,15 +112,16 @@ class App {
   }
 
   private initializeSwagger(): void {
-    if (env.swagger.enabled) {
+    if (config.swagger.enabled) {
       this.app.use(
-        env.swagger.path,
+        config.swagger.path,
         swaggerUi.serve,
         swaggerUi.setup(swaggerSpec, {
-          customSiteTitle: 'Wallet Management API Documentation',
+          customSiteTitle: config.swagger.title,
           customCss: '.swagger-ui .topbar { display: none }',
         })
       );
+      logger.info(`📚 Swagger documentation enabled at ${config.swagger.path}`);
     }
   }
 

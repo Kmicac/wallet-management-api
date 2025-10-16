@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import 'dotenv/config';
 import app from './app';
-import { env, validateEnv } from '@/config/env.config';
+import { config, validateEnv } from '@/config/env.config';
 import { initializeDatabase, closeDatabase } from '@/config/database.init';
 import { redisClient } from '@/config/redis.config';
 import { logger } from '@/config/logger.config';
@@ -10,44 +10,44 @@ class Server {
   private port: number;
 
   constructor() {
-    this.port = env.port;
+    this.port = config.port;
   }
 
   async start(): Promise<void> {
     try {
-      // Validate environment variables
       logger.info('🔍 Validating environment variables...');
       validateEnv();
-      logger.info('✅ Environment variables validated');
+      logger.info('✅ Environment variables validated successfully');
 
-      // Initialize database
       logger.info('🔌 Connecting to database...');
       await initializeDatabase();
 
-      // Initialize Redis
-      if (env.redis.enabled) {
+      if (config.redis.enabled) {
         logger.info('🔌 Connecting to Redis...');
         await redisClient.connect();
       }
 
       // Start server
       app.listen(this.port, () => {
-        logger.info('='.repeat(50));
-        logger.info(`🚀 Server is running on port ${this.port}`);
-        logger.info(`📝 Environment: ${env.node_env}`);
-        logger.info(`🌐 API Base URL: http://localhost:${this.port}${env.apiPrefix}`);
-        if (env.swagger.enabled) {
+        logger.info('='.repeat(60));
+        logger.info(`🚀 Server running on port ${this.port}`);
+        logger.info(`📝 Environment: ${config.node_env}`);
+        logger.info(`🌐 API Base URL: http://localhost:${this.port}${config.apiPrefix}`);
+        
+        if (config.swagger.enabled) {
           logger.info(
-            `📚 Swagger Docs: http://localhost:${this.port}${env.swagger.path}`
+            `📚 Swagger Docs: http://localhost:${this.port}${config.swagger.path}`
           );
         }
-        if (env.redis.enabled) {
-          logger.info(`🔴 Redis: ${redisClient.isRedisConnected() ? 'Connected' : 'Disconnected'}`);
+        
+        if (config.redis.enabled) {
+          const redisStatus = redisClient.isRedisConnected() ? '✅ Connected' : '❌ Disconnected';
+          logger.info(`🔴 Redis: ${redisStatus}`);
         }
-        logger.info('='.repeat(50));
+        
+        logger.info('='.repeat(60));
       });
 
-      // Graceful shutdown
       this.setupGracefulShutdown();
     } catch (error) {
       logger.error('❌ Failed to start server:', error);
@@ -56,12 +56,16 @@ class Server {
   }
 
   private setupGracefulShutdown(): void {
-    const shutdown = async (signal: string) => {
+    const shutdown = async (signal: string): Promise<void> => {
       logger.info(`\n${signal} received. Starting graceful shutdown...`);
 
       try {
         await closeDatabase();
-        await redisClient.disconnect();
+        
+        if (config.redis.enabled) {
+          await redisClient.disconnect();
+        }
+        
         logger.info('✅ Server shut down successfully');
         process.exit(0);
       } catch (error) {
@@ -70,20 +74,20 @@ class Server {
       }
     };
 
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => void shutdown('SIGTERM'));
+    process.on('SIGINT', () => void shutdown('SIGINT'));
 
-    process.on('unhandledRejection', (reason: any) => {
+    process.on('unhandledRejection', (reason: unknown) => {
       logger.error('❌ Unhandled Rejection:', reason);
-      shutdown('Unhandled Rejection');
+      void shutdown('Unhandled Rejection');
     });
 
     process.on('uncaughtException', (error: Error) => {
       logger.error('❌ Uncaught Exception:', error);
-      shutdown('Uncaught Exception');
+      void shutdown('Uncaught Exception');
     });
   }
 }
 
 const server = new Server();
-server.start();
+void server.start();

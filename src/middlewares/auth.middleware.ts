@@ -40,6 +40,7 @@ export const authenticate = async (
       return;
     }
 
+    // Check if token is blacklisted
     const isBlacklisted = await tokenBlacklistService.isBlacklisted(token);
     if (isBlacklisted) {
       res.status(401).json({
@@ -52,15 +53,15 @@ export const authenticate = async (
       return;
     }
 
+    // Verify token
     const payload = JwtUtil.verifyToken(token);
 
-    // Attach user info to request
     (req as AuthenticatedRequest).user = {
       id: payload.userId,
       email: payload.email,
     };
 
-    // Attach token to request for later use
+    (req as any).token = token;
 
     next();
   } catch (error) {

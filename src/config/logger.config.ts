@@ -1,6 +1,6 @@
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
-import { env } from './env.config';
+import { config } from './env.config';
 
 const levels = {
   error: 0,
@@ -26,26 +26,46 @@ const format = winston.format.combine(
   winston.format.printf((info) => `${info.timestamp} ${info.level}: ${info.message}`)
 );
 
-const transports = [
-  new winston.transports.Console(),
-  new DailyRotateFile({
-    filename: `${env.logging.filePath}/error-%DATE%.log`,
-    datePattern: 'YYYY-MM-DD',
-    level: 'error',
-    maxFiles: env.logging.maxFiles,
-    maxSize: env.logging.maxSize,
-  }),
-  new DailyRotateFile({
-    filename: `${env.logging.filePath}/combined-%DATE%.log`,
-    datePattern: 'YYYY-MM-DD',
-    maxFiles: env.logging.maxFiles,
-    maxSize: env.logging.maxSize,
+const transports: winston.transport[] = [
+  new winston.transports.Console({
+    format,
   }),
 ];
 
+// Add file transports only in non-test environments
+if (config.node_env !== 'test') {
+  transports.push(
+    new DailyRotateFile({
+      filename: `${config.logging.filePath}/error-%DATE%.log`,
+      datePattern: 'YYYY-MM-DD',
+      level: 'error',
+      maxFiles: config.logging.maxFiles,
+      maxSize: config.logging.maxSize,
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+      ),
+    }),
+    new DailyRotateFile({
+      filename: `${config.logging.filePath}/combined-%DATE%.log`,
+      datePattern: 'YYYY-MM-DD',
+      maxFiles: config.logging.maxFiles,
+      maxSize: config.logging.maxSize,
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+      ),
+    })
+  );
+}
+
 export const logger = winston.createLogger({
-  level: env.logging.level,
+  level: config.logging.level,
   levels,
-  format,
   transports,
+  exitOnError: false,
+});
+
+logger.on('error', (error) => {
+  console.error('Logger error:', error);
 });

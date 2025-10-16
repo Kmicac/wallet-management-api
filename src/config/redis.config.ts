@@ -1,152 +1,91 @@
 import Redis from 'ioredis';
-import { env } from './env.config';
+import { config } from './env.config';
 import { logger } from './logger.config';
 
 class RedisClient {
-    private client: Redis | null = null;
-    private isConnected: boolean = false;
+  private client: Redis | null = null;
+  private isConnected = false;
 
-    // Initialize Redis connection
-    async connect(): Promise<void> {
-        if (!env.redis.enabled) {
-            logger.info('📴 Redis is disabled');
-            return;
-        }
-
-        try {
-            this.client = new Redis({
-                host: env.redis.host,
-                port: env.redis.port,
-                password: env.redis.password || undefined,
-                db: env.redis.db,
-                retryStrategy: (times) => {
-                    const delay = Math.min(times * 50, 2000);
-                    return delay;
-                },
-                maxRetriesPerRequest: 3,
-            });
-
-            this.client.on('connect', () => {
-                this.isConnected = true;
-                logger.info('✅ Redis connected successfully');
-            });
-
-            this.client.on('error', (error) => {
-                logger.error('❌ Redis connection error:', error);
-                this.isConnected = false;
-            });
-
-            this.client.on('close', () => {
-                this.isConnected = false;
-                logger.warn('⚠️ Redis connection closed');
-            });
-
-            // Test connection
-            await this.client.ping();
-        } catch (error) {
-            logger.error('❌ Failed to connect to Redis:', error);
-            this.client = null;
-            this.isConnected = false;
-        }
+  async connect(): Promise<void> {
+    if (!config.redis.enabled) {
+      logger.info('Redis is disabled');
+      return;
     }
 
-    // Get Redis client instance
-    getClient(): Redis | null {
-        return this.client;
+    try {
+      this.client = new Redis({
+        host: config.redis.host,
+        port: config.redis.port,
+        password: config.redis.password || undefined,
+        db: config.redis.db,
+        retryStrategy: (times: number) => {
+          const delay = Math.min(times * 50, 2000);
+          return delay;
+        },
+        maxRetriesPerRequest: 3,
+      });
+
+      this.client.on('error', (err: Error) => {
+        logger.error('Redis Client Error:', err);
+        this.isConnected = false;
+      });
+
+      this.client.on('connect', () => {
+        logger.info('✅ Redis connected successfully');
+        this.isConnected = true;
+      });
+
+      this.client.on('ready', () => {
+        logger.info('✅ Redis ready to accept commands');
+        this.isConnected = true;
+      });
+
+      this.client.on('close', () => {
+        logger.warn('Redis connection closed');
+        this.isConnected = false;
+      });
+
+      this.client.on('reconnecting', () => {
+        logger.info('Redis reconnecting...');
+      });
+
+      // Wait for connection to be ready
+      await new Promise<void>((resolve, reject) => {
+        if (!this.client) {
+          reject(new Error('Redis client not initialized'));
+          return;
+        }
+
+        this.client.once('ready', () => resolve());
+        this.client.once('error', (err: Error) => reject(err));
+      });
+    } catch (error) {
+      logger.error('Failed to connect to Redis:', error);
+      throw error;
     }
+  }
 
-    // Check if Redis is connected
-    isRedisConnected(): boolean {
-        return this.isConnected && this.client !== null;
+  async disconnect(): Promise<void> {
+    if (this.client && this.isConnected) {
+      await this.client.quit();
+      this.isConnected = false;
+      logger.info('🔌 Redis disconnected');
     }
+  }
 
-    // Close Redis connection
-    async disconnect(): Promise<void> {
-        if (this.client) {
-            await this.client.quit();
-            this.client = null;
-            this.isConnected = false;
-            logger.info('🔌 Redis disconnected');
-        }
+  getClient(): Redis {
+    if (!this.client) {
+      throw new Error('Redis client is not initialized. Call connect() first.');
     }
-
-    // Set a key with expiration (in seconds)
-    async set(key: string, value: string, expirationInSeconds?: number): Promise<void> {
-        if (!this.isRedisConnected() || !this.client) {
-            logger.warn('Redis not connected, skipping set operation');
-            return;
-        }
-
-        try {
-            if (expirationInSeconds) {
-                await this.client.setex(key, expirationInSeconds, value);
-            } else {
-                await this.client.set(key, value);
-            }
-        } catch (error) {
-            logger.error('Error setting Redis key:', error);
-        }
+    if (!this.isConnected) {
+      throw new Error('Redis client is not connected');
     }
+    return this.client;
+  }
 
-    
-    //  Get a key
-    async get(key: string): Promise<string | null> {
-        if (!this.isRedisConnected() || !this.client) {
-            logger.warn('Redis not connected, skipping get operation');
-            return null;
-        }
-
-        try {
-            return await this.client.get(key);
-        } catch (error) {
-            logger.error('Error getting Redis key:', error);
-            return null;
-        }
-    }
-
-
-    //  Delete a key
-    async delete(key: string): Promise<void> {
-        if (!this.isRedisConnected() || !this.client) {
-            logger.warn('Redis not connected, skipping delete operation');
-            return;
-        }
-
-        try {
-            await this.client.del(key);
-        } catch (error) {
-            logger.error('Error deleting Redis key:', error);
-        }
-    }
-
-    //   Check if key exists
-    async exists(key: string): Promise<boolean> {
-        if (!this.isRedisConnected() || !this.client) {
-            return false;
-        }
-
-        try {
-            const result = await this.client.exists(key);
-            return result === 1;
-        } catch (error) {
-            logger.error('Error checking Redis key existence:', error);
-            return false;
-        }
-    }
-
-
-    //  Set expiration on a key (in seconds)
-    async expire(key: string, seconds: number): Promise<void> {
-        if (!this.isRedisConnected() || !this.client) {
-            return;
-        }
-
-        try {
-            await this.client.expire(key, seconds);
-        } catch (error) {
-            logger.error('Error setting Redis key expiration:', error);
-        }
-    }
+  isRedisConnected(): boolean {
+    return this.isConnected;
+  }
 }
 
 export const redisClient = new RedisClient();
