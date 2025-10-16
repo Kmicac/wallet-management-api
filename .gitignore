@@ -45,3 +45,5 @@ temp/
 # Security audit reports
 security-audit.json
 
+# Ignorar configuración personal
+.npmrc.local

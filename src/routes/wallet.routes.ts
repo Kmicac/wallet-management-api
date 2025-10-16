@@ -110,23 +110,6 @@ router.get('/', walletController.getWalletsPaginated);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- *             examples:
- *               invalidChain:
- *                 summary: Unsupported blockchain
- *                 value:
- *                   success: false
- *                   message: Validation failed
- *                   error:
- *                     code: BAD_REQUEST
- *                     details: ["Unsupported blockchain: Cardano"]
- *               invalidAddress:
- *                 *                 summary: Invalid address format
- *                 value:
- *                   success: false
- *                   message: Blockchain address validation failed
- *                   error:
- *                     code: BLOCKCHAIN_VALIDATION_ERROR
- *                     details: ["Invalid Ethereum address format"]
  *       401:
  *         description: Unauthorized - Missing or invalid token
  *         content:
