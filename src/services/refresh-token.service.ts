@@ -6,8 +6,6 @@ export class RefreshTokenService {
   private readonly prefix = 'refresh_token:';
   private readonly userTokensPrefix = 'user_tokens:';
 
-
-  // Store refresh token in Redis
   async storeRefreshToken(
     userId: string,
     refreshToken: string,
@@ -17,13 +15,9 @@ export class RefreshTokenService {
       const client = redisClient.getClient();
       const expiresIn = this.parseExpiration(config.jwt.refreshExpiresIn);
 
-      // Store token with userId as value
-      await client.setex(`${this.prefix}${refreshToken}`, expiresIn, userId);
-
-      // Add token to user's set of tokens
+      await client.set(`${this.prefix}${refreshToken}`, userId, 'EX', expiresIn);
       await client.sadd(`${this.userTokensPrefix}${userId}`, refreshToken);
 
-      // If there's an old token, remove it (rotation)
       if (oldRefreshToken) {
         await this.revokeRefreshToken(oldRefreshToken);
       }
@@ -35,7 +29,6 @@ export class RefreshTokenService {
     }
   }
 
-  // Verify refresh token exists and return userId
   async verifyRefreshToken(refreshToken: string): Promise<string | null> {
     try {
       const client = redisClient.getClient();
@@ -53,18 +46,12 @@ export class RefreshTokenService {
     }
   }
 
-  // Revoke a specific refresh token
   async revokeRefreshToken(refreshToken: string): Promise<void> {
     try {
       const client = redisClient.getClient();
-
-      // Get userId before deleting
       const userId = await client.get(`${this.prefix}${refreshToken}`);
-
-      // Delete token
       await client.del(`${this.prefix}${refreshToken}`);
 
-      // Remove from user's set
       if (userId) {
         await client.srem(`${this.userTokensPrefix}${userId}`, refreshToken);
       }
@@ -76,15 +63,11 @@ export class RefreshTokenService {
     }
   }
 
-// Revoke all refresh tokens for a user
   async revokeAllUserTokens(userId: string): Promise<void> {
     try {
       const client = redisClient.getClient();
-
-      // Get all tokens for user
       const tokens = await client.smembers(`${this.userTokensPrefix}${userId}`);
 
-      // Delete all tokens
       if (tokens.length > 0) {
         const pipeline = client.pipeline();
         tokens.forEach((token) => {
@@ -93,9 +76,7 @@ export class RefreshTokenService {
         await pipeline.exec();
       }
 
-      // Delete user's token set
       await client.del(`${this.userTokensPrefix}${userId}`);
-
       logger.info(`All refresh tokens revoked for user: ${userId}`);
     } catch (error) {
       logger.error('Error revoking all user tokens:', error);

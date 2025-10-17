@@ -22,25 +22,3 @@ export class RefreshTokenDto {
   @IsString()
   refreshToken!: string;
 }
-
-export interface AuthResponse {
-  success: boolean;
-  message: string;
-  data?: {
-    user: {
-      id: string;
-      email: string;
-    };
-    token: string;
-    refreshToken: string;
-  };
-}
-
-export interface RefreshTokenResponse {
-  success: boolean;
-  message: string;
-  data?: {
-    token: string;
-    refreshToken: string;
-  };
-}

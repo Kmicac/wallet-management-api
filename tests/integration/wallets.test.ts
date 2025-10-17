@@ -8,39 +8,75 @@ import {
 
 // Mock Redis 
 const mockRedisStore = new Map<string, string>();
+const mockRedisSets = new Map<string, Set<string>>();
 
 jest.mock('../../src/config/redis.config', () => ({
   redisClient: {
     connect: jest.fn().mockResolvedValue(undefined),
     disconnect: jest.fn().mockResolvedValue(undefined),
-    set: jest.fn().mockImplementation((key: string, value: string) => {
-      mockRedisStore.set(key, value);
-      return Promise.resolve('OK');
-    }),
-    get: jest.fn().mockImplementation((key: string) => {
-      return Promise.resolve(mockRedisStore.get(key) || null);
-    }),
-    delete: jest.fn().mockImplementation((key: string) => {
-      mockRedisStore.delete(key);
-      return Promise.resolve(1);
-    }),
-    del: jest.fn().mockImplementation((key: string) => {
-      mockRedisStore.delete(key);
-      return Promise.resolve(1);
-    }),
-    exists: jest.fn().mockImplementation((key: string) => {
-      return Promise.resolve(mockRedisStore.has(key) ? 1 : 0);
-    }),
-    expire: jest.fn().mockResolvedValue(1),
-    setEx: jest.fn().mockImplementation((key: string, _ttl: number, value: string) => {
-      mockRedisStore.set(key, value);
-      return Promise.resolve('OK');
-    }),
     isRedisConnected: jest.fn().mockReturnValue(true),
     getClient: jest.fn().mockReturnValue({
-      set: jest.fn(),
-      get: jest.fn(),
-      del: jest.fn(),
+      set: jest.fn().mockImplementation((key: string, value: string) => {
+        mockRedisStore.set(key, value);
+        return Promise.resolve('OK');
+      }),
+      get: jest.fn().mockImplementation((key: string) => {
+        return Promise.resolve(mockRedisStore.get(key) || null);
+      }),
+      del: jest.fn().mockImplementation((...keys: string[]) => {
+        let deletedCount = 0;
+        keys.forEach(key => {
+          if (mockRedisStore.delete(key)) deletedCount++;
+        });
+        return Promise.resolve(deletedCount);
+      }),
+      exists: jest.fn().mockImplementation((key: string) => {
+        return Promise.resolve(mockRedisStore.has(key) ? 1 : 0);
+      }),
+      expire: jest.fn().mockResolvedValue(1),
+      sadd: jest.fn().mockImplementation((key: string, ...members: string[]) => {
+        if (!mockRedisSets.has(key)) {
+          mockRedisSets.set(key, new Set());
+        }
+        const set = mockRedisSets.get(key)!;
+        let added = 0;
+        members.forEach(member => {
+          if (!set.has(member)) {
+            set.add(member);
+            added++;
+          }
+        });
+        return Promise.resolve(added);
+      }),
+      smembers: jest.fn().mockImplementation((key: string) => {
+        const set = mockRedisSets.get(key);
+        return Promise.resolve(set ? Array.from(set) : []);
+      }),
+      srem: jest.fn().mockImplementation((key: string, ...members: string[]) => {
+        const set = mockRedisSets.get(key);
+        if (!set) return Promise.resolve(0);
+        let removed = 0;
+        members.forEach(member => {
+          if (set.delete(member)) removed++;
+        });
+        return Promise.resolve(removed);
+      }),
+      pipeline: jest.fn().mockReturnValue({
+        del: jest.fn(function(this: any, key: string) {
+          if (!this._keys) this._keys = [];
+          this._keys.push(key);
+          return this;
+        }),
+        exec: jest.fn(function(this: any) {
+          if (this._keys) {
+            this._keys.forEach((key: string) => {
+              mockRedisStore.delete(key);
+            });
+            this._keys = [];
+          }
+          return Promise.resolve([]);
+        }),
+      }),
     }),
   },
 }));
@@ -76,7 +112,7 @@ describe('Wallets Integration Tests', () => {
     authToken = response.body.data.token;
   });
 
-   afterAll(async () => {
+  afterAll(async () => {
     await testDb.destroy();
   });
 
@@ -169,7 +205,7 @@ describe('Wallets Integration Tests', () => {
           address,
           tag: 'Duplicate Wallet',
         })
-        .expect(400);
+        .expect(409);
 
       expect(response.body.success).toBe(false);
     });
@@ -395,7 +431,7 @@ describe('Wallets Integration Tests', () => {
         .put(`/api/wallets/${wallet2Response.body.data.id}`)
         .set('Authorization', `Bearer ${authToken}`)
         .send({ address: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F' })
-        .expect(400);
+        .expect(409);
 
       expect(response.body.success).toBe(false);
     });

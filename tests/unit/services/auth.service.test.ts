@@ -7,41 +7,76 @@ import {
 } from '../../utils/test-helpers';
 import { ConflictError, UnauthorizedError } from '../../../src/utils/errors.util';
 
-// Mock Redis funcional
 const mockRedisStore = new Map<string, string>();
+const mockRedisSets = new Map<string, Set<string>>();
 
 jest.mock('../../../src/config/redis.config', () => ({
   redisClient: {
     connect: jest.fn().mockResolvedValue(undefined),
     disconnect: jest.fn().mockResolvedValue(undefined),
-    set: jest.fn().mockImplementation((key: string, value: string) => {
-      mockRedisStore.set(key, value);
-      return Promise.resolve('OK');
-    }),
-    get: jest.fn().mockImplementation((key: string) => {
-      return Promise.resolve(mockRedisStore.get(key) || null);
-    }),
-    delete: jest.fn().mockImplementation((key: string) => {
-      mockRedisStore.delete(key);
-      return Promise.resolve(1);
-    }),
-    del: jest.fn().mockImplementation((key: string) => {
-      mockRedisStore.delete(key);
-      return Promise.resolve(1);
-    }),
-    exists: jest.fn().mockImplementation((key: string) => {
-      return Promise.resolve(mockRedisStore.has(key) ? 1 : 0);
-    }),
-    expire: jest.fn().mockResolvedValue(1),
-    setEx: jest.fn().mockImplementation((key: string, _ttl: number, value: string) => {
-      mockRedisStore.set(key, value);
-      return Promise.resolve('OK');
-    }),
     isRedisConnected: jest.fn().mockReturnValue(true),
     getClient: jest.fn().mockReturnValue({
-      set: jest.fn(),
-      get: jest.fn(),
-      del: jest.fn(),
+      set: jest.fn().mockImplementation((key: string, value: string) => {
+        mockRedisStore.set(key, value);
+        return Promise.resolve('OK');
+      }),
+      get: jest.fn().mockImplementation((key: string) => {
+        return Promise.resolve(mockRedisStore.get(key) || null);
+      }),
+      del: jest.fn().mockImplementation((...keys: string[]) => {
+        let deletedCount = 0;
+        keys.forEach(key => {
+          if (mockRedisStore.delete(key)) deletedCount++;
+        });
+        return Promise.resolve(deletedCount);
+      }),
+      exists: jest.fn().mockImplementation((key: string) => {
+        return Promise.resolve(mockRedisStore.has(key) ? 1 : 0);
+      }),
+      expire: jest.fn().mockResolvedValue(1),
+      sadd: jest.fn().mockImplementation((key: string, ...members: string[]) => {
+        if (!mockRedisSets.has(key)) {
+          mockRedisSets.set(key, new Set());
+        }
+        const set = mockRedisSets.get(key)!;
+        let added = 0;
+        members.forEach(member => {
+          if (!set.has(member)) {
+            set.add(member);
+            added++;
+          }
+        });
+        return Promise.resolve(added);
+      }),
+      smembers: jest.fn().mockImplementation((key: string) => {
+        const set = mockRedisSets.get(key);
+        return Promise.resolve(set ? Array.from(set) : []);
+      }),
+      srem: jest.fn().mockImplementation((key: string, ...members: string[]) => {
+        const set = mockRedisSets.get(key);
+        if (!set) return Promise.resolve(0);
+        let removed = 0;
+        members.forEach(member => {
+          if (set.delete(member)) removed++;
+        });
+        return Promise.resolve(removed);
+      }),
+      pipeline: jest.fn().mockReturnValue({
+        del: jest.fn(function (this: any, key: string) {
+          if (!this._keys) this._keys = [];
+          this._keys.push(key);
+          return this;
+        }),
+        exec: jest.fn(function (this: any) {
+          if (this._keys) {
+            this._keys.forEach((key: string) => {
+              mockRedisStore.delete(key);
+            });
+            this._keys = [];
+          }
+          return Promise.resolve([]);
+        }),
+      }),
     }),
   },
 }));
@@ -52,16 +87,13 @@ describe('AuthService Unit Tests', () => {
   let authService: any;
 
   beforeAll(async () => {
-    // 1. Inicializar DB
     testDb = await initTestDatabase();
 
-    // 2. Mock del AppDataSource ANTES de importar el service
     jest.mock('../../../src/config/database', () => ({
       __esModule: true,
       default: testDb,
     }));
 
-    // 3. Importar AuthService DESPUÉS del mock
     const authModule = await import('../../../src/services/auth.service');
     AuthService = authModule.AuthService;
   });
@@ -73,9 +105,7 @@ describe('AuthService Unit Tests', () => {
   beforeEach(async () => {
     await clearDatabase(testDb);
     mockRedisStore.clear();
-    // Crear nueva instancia del servicio con la DB real
     authService = new AuthService();
-    // Inyectar manualmente la conexión de testDb
     authService['userRepository']['repository'] = testDb.getRepository('User');
   });
 
@@ -86,12 +116,10 @@ describe('AuthService Unit Tests', () => {
 
       const result = await authService.signUp({ email, password });
 
-      expect(result.success).toBe(true);
-      expect(result.message).toBe('User registered successfully');
-      expect(result.data?.user.email).toBe(email);
-      expect(result.data?.user.id).toBeDefined();
-      expect(result.data?.token).toBeDefined();
-      expect(result.data?.refreshToken).toBeDefined();
+      expect(result.user.email).toBe(email);
+      expect(result.user.id).toBeDefined();
+      expect(result.token).toBeDefined();
+      expect(result.refreshToken).toBeDefined();
     });
 
     it('should throw ConflictError if email already exists', async () => {
@@ -115,11 +143,11 @@ describe('AuthService Unit Tests', () => {
 
       const result = await authService.signUp({ email, password });
 
-      expect(result.data?.user).toBeDefined();
-      expect(result.data?.user.email).toBe(email);
+      expect(result.user).toBeDefined();
+      expect(result.user.email).toBe(email);
 
       const signInResult = await authService.signIn({ email, password });
-      expect(signInResult.success).toBe(true);
+      expect(signInResult.user.email).toBe(email);
     });
 
     it('should generate valid JWT tokens', async () => {
@@ -128,13 +156,13 @@ describe('AuthService Unit Tests', () => {
 
       const result = await authService.signUp({ email, password });
 
-      expect(result.data?.token).toBeDefined();
-      expect(typeof result.data?.token).toBe('string');
-      expect(result.data?.token.split('.')).toHaveLength(3);
+      expect(result.token).toBeDefined();
+      expect(typeof result.token).toBe('string');
+      expect(result.token.split('.')).toHaveLength(3);
 
-      expect(result.data?.refreshToken).toBeDefined();
-      expect(typeof result.data?.refreshToken).toBe('string');
-      expect(result.data?.refreshToken.split('.')).toHaveLength(3);
+      expect(result.refreshToken).toBeDefined();
+      expect(typeof result.refreshToken).toBe('string');
+      expect(result.refreshToken.split('.')).toHaveLength(3);
     });
   });
 
@@ -147,11 +175,9 @@ describe('AuthService Unit Tests', () => {
 
       const result = await authService.signIn({ email, password });
 
-      expect(result.success).toBe(true);
-      expect(result.message).toBe('Sign in successful');
-      expect(result.data?.user.email).toBe(email);
-      expect(result.data?.token).toBeDefined();
-      expect(result.data?.refreshToken).toBeDefined();
+      expect(result.user.email).toBe(email);
+      expect(result.token).toBeDefined();
+      expect(result.refreshToken).toBeDefined();
     });
 
     it('should throw UnauthorizedError with wrong password', async () => {
@@ -192,11 +218,11 @@ describe('AuthService Unit Tests', () => {
       const result1 = await authService.signIn({ email, password });
 
       await new Promise(resolve => setTimeout(resolve, 1000));
-      
+
       const result2 = await authService.signIn({ email, password });
 
-      expect(result1.data?.token).not.toBe(result2.data?.token);
-      expect(result1.data?.refreshToken).not.toBe(result2.data?.refreshToken);
+      expect(result1.token).not.toBe(result2.token);
+      expect(result1.refreshToken).not.toBe(result2.refreshToken);
     });
   });
 
@@ -206,13 +232,12 @@ describe('AuthService Unit Tests', () => {
       const password = 'SecurePass123!';
 
       const signUpResult = await authService.signUp({ email, password });
-      const oldRefreshToken = signUpResult.data!.refreshToken;
+      const oldRefreshToken = signUpResult.refreshToken;
 
       const result = await authService.refreshToken(oldRefreshToken);
 
-      expect(result.success).toBe(true);
-      expect(result.data?.token).toBeDefined();
-      expect(result.data?.refreshToken).toBeDefined();
+      expect(result.token).toBeDefined();
+      expect(result.refreshToken).toBeDefined();
     });
 
     it('should throw UnauthorizedError with invalid refresh token', async () => {
@@ -238,10 +263,10 @@ describe('AuthService Unit Tests', () => {
       const password = 'SecurePass123!';
 
       const signUpResult = await authService.signUp({ email, password });
-      const oldRefreshToken = signUpResult.data!.refreshToken;
+      const oldRefreshToken = signUpResult.refreshToken;
 
       const firstRefresh = await authService.refreshToken(oldRefreshToken);
-      expect(firstRefresh.success).toBe(true);
+      expect(firstRefresh.token).toBeDefined();
 
       await expect(
         authService.refreshToken(oldRefreshToken)
@@ -255,13 +280,10 @@ describe('AuthService Unit Tests', () => {
       const password = 'SecurePass123!';
 
       const signUpResult = await authService.signUp({ email, password });
-      const userId = signUpResult.data!.user.id;
-      const token = signUpResult.data!.token;
+      const userId = signUpResult.user.id;
+      const token = signUpResult.token;
 
-      const result = await authService.signOut(userId, token);
-
-      expect(result.success).toBe(true);
-      expect(result.message).toBe('Sign out successful');
+      await expect(authService.signOut(userId, token)).resolves.not.toThrow();
     });
 
     it('should blacklist token on signout', async () => {
@@ -269,8 +291,8 @@ describe('AuthService Unit Tests', () => {
       const password = 'SecurePass123!';
 
       const signUpResult = await authService.signUp({ email, password });
-      const userId = signUpResult.data!.user.id;
-      const token = signUpResult.data!.token;
+      const userId = signUpResult.user.id;
+      const token = signUpResult.token;
 
       await authService.signOut(userId, token);
 
@@ -282,9 +304,9 @@ describe('AuthService Unit Tests', () => {
       const password = 'SecurePass123!';
 
       const signUpResult = await authService.signUp({ email, password });
-      const userId = signUpResult.data!.user.id;
-      const token = signUpResult.data!.token;
-      const refreshToken = signUpResult.data!.refreshToken;
+      const userId = signUpResult.user.id;
+      const token = signUpResult.token;
+      const refreshToken = signUpResult.refreshToken;
 
       await authService.signOut(userId, token);
 
@@ -312,8 +334,7 @@ describe('AuthService Unit Tests', () => {
         password
       });
 
-      expect(result.success).toBe(true);
-      expect(result.data?.user.email).toBe(maliciousEmail);
+      expect(result.user.email).toBe(maliciousEmail);
     });
 
     it('should handle special characters in password', async () => {
@@ -325,14 +346,14 @@ describe('AuthService Unit Tests', () => {
         password: specialPassword
       });
 
-      expect(signUpResult.success).toBe(true);
+      expect(signUpResult.user.email).toBe(email);
 
       const signInResult = await authService.signIn({
         email,
         password: specialPassword
       });
 
-      expect(signInResult.success).toBe(true);
+      expect(signInResult.user.email).toBe(email);
     });
 
     it('should handle unicode characters in email', async () => {
@@ -341,8 +362,7 @@ describe('AuthService Unit Tests', () => {
 
       const result = await authService.signUp({ email, password });
 
-      expect(result.success).toBe(true);
-      expect(result.data?.user.email).toBe(email);
+      expect(result.user.email).toBe(email);
     });
   });
 });

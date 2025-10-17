@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '@/config/logger.config';
 import { AppError } from '@/utils/errors.util';
+import { ResponseBuilder } from '@/utils/response.builder';
+import { config } from '@/config/env.config';
 
 export const errorHandler = (
   err: Error | AppError,
@@ -9,18 +11,15 @@ export const errorHandler = (
   _next: NextFunction
 ): void => {
   let statusCode = 500;
-  let message = 'Internal Server Error';
   let code = 'INTERNAL_SERVER_ERROR';
+  let message = 'Internal Server Error';
   let details: any = undefined;
-  let isOperational = false;
 
-  // Check if error is an AppError instance
   if (err instanceof AppError) {
     statusCode = err.statusCode;
-    message = err.message;
     code = err.code || 'UNKNOWN_ERROR';
+    message = err.message;
     details = err.details;
-    isOperational = err.isOperational;
   } else {
     message = err.message || message;
   }
@@ -42,40 +41,28 @@ export const errorHandler = (
     logger.warn('Client Error:', errorLog);
   }
 
-  const response: any = {
-    success: false,
-    error: {
-      code,
-      message,
-    },
-  };
+  const response = ResponseBuilder.error(message, code, details);
 
-  if (details && (process.env.NODE_ENV === 'development' || isOperational)) {
-    response.error.details = details;
-  }
-
-  if (process.env.NODE_ENV === 'development' && err.stack) {
-    response.error.stack = err.stack;
+  if (config.isDevelopment && err.stack) {
+    (response.error as any).stack = err.stack;
   }
 
   res.status(statusCode).json(response);
 };
 
 export const notFoundHandler = (req: Request, res: Response): void => {
-  res.status(404).json({
-    success: false,
-    error: {
-      code: 'NOT_FOUND',
-      message: `Route ${req.method} ${req.originalUrl} not found`,
-    },
-  });
+  const response = ResponseBuilder.error(
+    `Route ${req.method} ${req.originalUrl} not found`,
+    'NOT_FOUND'
+  );
+
+  res.status(404).json(response);
 };
 
-//  Async handler wrapper to catch errors in async route handlers
 export const asyncHandler = (
   fn: (req: Request, res: Response, next: NextFunction) => Promise<any>
 ) => {
-  return (req: Request, res: Response, next: NextFunction) => {
+  return (req: Request, res: Response, next: NextFunction): void => {
     Promise.resolve(fn(req, res, next)).catch(next);
   };
 };

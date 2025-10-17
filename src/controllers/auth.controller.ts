@@ -1,10 +1,11 @@
 import { Request, Response } from 'express';
 import { AuthService } from '@/services/auth.service';
 import { SignInDto, SignUpDto, RefreshTokenDto } from '@/dto/auth.dto';
+import { AuthenticatedRequest } from '@/interfaces/request.interface';
+import { ResponseBuilder } from '@/utils/response.builder';
+import { asyncHandler } from '@/middlewares/error.middleware';
 import { validate } from 'class-validator';
 import { plainToClass } from 'class-transformer';
-import { logger } from '@/config/logger.config';
-import { AuthenticatedRequest } from '@/interfaces/request.interface';
 
 export class AuthController {
   private authService: AuthService;
@@ -13,175 +14,97 @@ export class AuthController {
     this.authService = new AuthService();
   }
 
-  signUp = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const dto = plainToClass(SignUpDto, req.body);
-      const errors = await validate(dto);
-
-      if (errors.length > 0) {
-        res.status(400).json({
-          success: false,
-          message: 'Validation failed',
-          errors: errors.map((err) => ({
+  signUp = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const dto = plainToClass(SignUpDto, req.body, { enableImplicitConversion: true });
+    const errors = await validate(dto);
+    
+    if (errors.length > 0) {
+      res.status(400).json(
+        ResponseBuilder.error(
+          'Validation failed',
+          'VALIDATION_ERROR',
+          errors.map((err) => ({
             field: err.property,
             constraints: err.constraints,
-          })),
-        });
-        return;
-      }
-
-      const result = await this.authService.signUp(dto);
-      res.status(201).json(result);
-    } catch (error: any) {
-      logger.error('Error in signUp controller:', error);
-      
-      if (error.statusCode) {
-        res.status(error.statusCode).json({
-          success: false,
-          error: {
-            code: error.code,
-            message: error.message,
-          },
-        });
-        return;
-      }
-
-      res.status(500).json({
-        success: false,
-        error: {
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Internal server error',
-        },
-      });
+          }))
+        )
+      );
+      return;
     }
-  };
 
-  signIn = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const dto = plainToClass(SignInDto, req.body);
-      const errors = await validate(dto);
+    const result = await this.authService.signUp(dto);
 
-      if (errors.length > 0) {
-        res.status(400).json({
-          success: false,
-          message: 'Validation failed',
-          errors: errors.map((err) => ({
+    res.status(201).json(
+      ResponseBuilder.success(result, 'User registered successfully')
+    );
+  });
+
+  signIn = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const dto = plainToClass(SignInDto, req.body, { enableImplicitConversion: true });
+    const errors = await validate(dto);
+    
+    if (errors.length > 0) {
+      res.status(400).json(
+        ResponseBuilder.error(
+          'Validation failed',
+          'VALIDATION_ERROR',
+          errors.map((err) => ({
             field: err.property,
             constraints: err.constraints,
-          })),
-        });
-        return;
-      }
-
-      const result = await this.authService.signIn(dto);
-      res.status(200).json(result);
-    } catch (error: any) {
-      logger.error('Error in signIn controller:', error);
-
-      if (error.statusCode) {
-        res.status(error.statusCode).json({
-          success: false,
-          error: {
-            code: error.code,
-            message: error.message,
-          },
-        });
-        return;
-      }
-
-      res.status(500).json({
-        success: false,
-        error: {
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Internal server error',
-        },
-      });
+          }))
+        )
+      );
+      return;
     }
-  };
 
-  refreshToken = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const dto = plainToClass(RefreshTokenDto, req.body);
-      const errors = await validate(dto);
+    const result = await this.authService.signIn(dto);
 
-      if (errors.length > 0) {
-        res.status(400).json({
-          success: false,
-          message: 'Validation failed',
-          errors: errors.map((err) => ({
+    res.status(200).json(
+      ResponseBuilder.success(result, 'Sign in successful')
+    );
+  });
+
+  refreshToken = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const dto = plainToClass(RefreshTokenDto, req.body, { enableImplicitConversion: true });
+    const errors = await validate(dto);
+    
+    if (errors.length > 0) {
+      res.status(400).json(
+        ResponseBuilder.error(
+          'Validation failed',
+          'VALIDATION_ERROR',
+          errors.map((err) => ({
             field: err.property,
             constraints: err.constraints,
-          })),
-        });
-        return;
-      }
-
-      const result = await this.authService.refreshToken(dto.refreshToken);
-      res.status(200).json(result);
-    } catch (error: any) {
-      logger.error('Error in refreshToken controller:', error);
-
-      if (error.statusCode) {
-        res.status(error.statusCode).json({
-          success: false,
-          error: {
-            code: error.code,
-            message: error.message,
-          },
-        });
-        return;
-      }
-
-      res.status(500).json({
-        success: false,
-        error: {
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Internal server error',
-        },
-      });
+          }))
+        )
+      );
+      return;
     }
-  };
 
-  signOut = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const authenticatedReq = req as AuthenticatedRequest;
-      const userId = authenticatedReq.user?.id;
-      const token = (req as any).token;
+    const result = await this.authService.refreshToken(dto.refreshToken);
 
-      if (!userId || !token) {
-        res.status(401).json({
-          success: false,
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Unauthorized',
-          },
-        });
-        return;
-      }
+    res.status(200).json(
+      ResponseBuilder.success(result, 'Tokens refreshed successfully')
+    );
+  });
 
-      const result = await this.authService.signOut(userId, token);
-      res.status(200).json(result);
-    } catch (error: any) {
-      logger.error('Error in signOut controller:', error);
+  signOut = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authenticatedReq = req as AuthenticatedRequest;
+    const userId = authenticatedReq.user!.id;
+    const token = authenticatedReq.headers.authorization?.replace('Bearer ', '');
 
-      if (error.statusCode) {
-        res.status(error.statusCode).json({
-          success: false,
-          error: {
-            code: error.code,
-            message: error.message,
-          },
-        });
-        return;
-      }
-
-      res.status(500).json({
-        success: false,
-        error: {
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Internal server error',
-        },
-      });
+    if (!token) {
+      res.status(401).json(
+        ResponseBuilder.error('No token provided', 'UNAUTHORIZED')
+      );
+      return;
     }
-  };
+
+    await this.authService.signOut(userId, token);
+
+    res.status(200).json(
+      ResponseBuilder.successMessage('Sign out successful')
+    );
+  });
 }
