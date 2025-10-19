@@ -10,6 +10,7 @@ import { config } from '@/config/env.config';
 import { swaggerSpec } from '@/config/swagger.config';
 import { errorHandler, notFoundHandler } from '@/middlewares/error.middleware';
 import { requestLogger } from '@/middlewares/logger.middleware';
+import healthRoutes from '@/routes/health.routes';
 import authRoutes from '@/routes/auth.routes';
 import walletRoutes from '@/routes/wallet.routes';
 import { logger } from '@/config/logger.config';
@@ -26,10 +27,9 @@ class App {
   }
 
   private initializeMiddlewares(): void {
-    // Security middleware
+
     this.app.use(helmet());
 
-    // CORS configuration
     this.app.use(
       cors({
         origin: config.security.cors.origin,
@@ -39,7 +39,6 @@ class App {
 
     this.app.use(compression());
 
-    // Body parsers
     this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
     this.app.use(cookieParser());
@@ -69,15 +68,7 @@ class App {
 
   private initializeRoutes(): void {
 
-    this.app.get('/health', (_req, res) => {
-      res.json({
-        success: true,
-        message: 'API is running',
-        timestamp: new Date().toISOString(),
-        environment: config.node_env,
-        version: process.env.npm_package_version || '1.0.0',
-      });
-    });
+    this.app.use(healthRoutes);
 
     // API routes
     this.app.use(`${config.apiPrefix}/auth`, authRoutes);
