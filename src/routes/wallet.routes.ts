@@ -1,11 +1,33 @@
 import { Router } from 'express';
 import { WalletController } from '@/controllers/wallet.controller';
 import { authenticate } from '@/middlewares/auth.middleware';
+import rateLimit from 'express-rate-limit';
+import { AuthenticatedRequest } from '@/interfaces/request.interface';
 
 const router = Router();
 const walletController = new WalletController();
 
 router.use(authenticate);
+
+const userLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, 
+  max: 50, 
+  keyGenerator: (req) => {
+    const authenticatedReq = req as AuthenticatedRequest;
+    return authenticatedReq.user?.id || req.ip || 'unknown';
+  },
+  message: {
+    success: false,
+    error: {
+      code: 'USER_RATE_LIMIT_EXCEEDED',
+      message: 'Too many requests. Please try again in 15 minutes.',
+    },
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.use(userLimiter);
 
 /**
  * @swagger
@@ -60,6 +82,12 @@ router.use(authenticate);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
+ *       429:
+ *         description: Too many requests (max 50 per 15 minutes per user)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.get('/', walletController.getWalletsPaginated);
 
@@ -84,19 +112,13 @@ router.get('/', walletController.getWalletsPaginated);
  *               value:
  *                 chain: Ethereum
  *                 address: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F"
- *                 tag: My Main ETH Wallet
+ *                 tag: "My ETH Wallet"
  *             bitcoin:
  *               summary: Bitcoin wallet
  *               value:
  *                 chain: Bitcoin
  *                 address: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
- *                 tag: BTC Savings
- *             solana:
- *               summary: Solana wallet
- *               value:
- *                 chain: Solana
- *                 address: "DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK"
- *                 tag: SOL Trading Wallet
+ *                 tag: "BTC Genesis"
  *     responses:
  *       201:
  *         description: Wallet created successfully
@@ -105,19 +127,19 @@ router.get('/', walletController.getWalletsPaginated);
  *             schema:
  *               $ref: '#/components/schemas/WalletResponse'
  *       400:
- *         description: Validation error - Invalid blockchain or address format
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       401:
- *         description: Unauthorized - Missing or invalid token
+ *         description: Validation error or unsupported blockchain
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       409:
- *         description: Conflict - Wallet with this address already exists
+ *         description: Wallet address already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       429:
+ *         description: Too many requests (max 50 per 15 minutes per user)
  *         content:
  *           application/json:
  *             schema:
@@ -162,11 +184,12 @@ router.post('/', walletController.createWallet);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- *             example:
- *               success: false
- *               message: Wallet not found
- *               error:
- *                 code: NOT_FOUND
+ *       429:
+ *         description: Too many requests (max 50 per 15 minutes per user)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.get('/:id', walletController.getWalletById);
 
@@ -187,7 +210,6 @@ router.get('/:id', walletController.getWalletById);
  *           type: string
  *           format: uuid
  *         description: Wallet unique identifier
- *         example: 987fcdeb-51a2-43f1-9876-ba9876543210
  *     requestBody:
  *       required: true
  *       content:
@@ -198,16 +220,11 @@ router.get('/:id', walletController.getWalletById);
  *             updateTag:
  *               summary: Update only tag
  *               value:
- *                 tag: Updated Wallet Name
+ *                 tag: "Updated Wallet Name"
  *             updateAddress:
- *               summary: Update only address
+ *               summary: Update address
  *               value:
  *                 address: "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
- *             updateBoth:
- *               summary: Update both tag and address
- *               value:
- *                 address: "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
- *                 tag: My Secondary Wallet
  *     responses:
  *       200:
  *         description: Wallet updated successfully
@@ -216,13 +233,7 @@ router.get('/:id', walletController.getWalletById);
  *             schema:
  *               $ref: '#/components/schemas/WalletResponse'
  *       400:
- *         description: Validation error - Invalid address format
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       401:
- *         description: Unauthorized - Missing or invalid token
+ *         description: Validation error
  *         content:
  *           application/json:
  *             schema:
@@ -234,7 +245,13 @@ router.get('/:id', walletController.getWalletById);
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       409:
- *         description: Conflict - Another wallet with this address already exists
+ *         description: New address already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       429:
+ *         description: Too many requests (max 50 per 15 minutes per user)
  *         content:
  *           application/json:
  *             schema:
@@ -247,7 +264,7 @@ router.put('/:id', walletController.updateWallet);
  * /api/wallets/{id}:
  *   delete:
  *     summary: Delete wallet
- *     description: Permanently delete a wallet from your account. This action cannot be undone.
+ *     description: Permanently delete a wallet from your account
  *     tags: [Wallets]
  *     security:
  *       - bearerAuth: []
@@ -259,7 +276,6 @@ router.put('/:id', walletController.updateWallet);
  *           type: string
  *           format: uuid
  *         description: Wallet unique identifier
- *         example: 987fcdeb-51a2-43f1-9876-ba9876543210
  *     responses:
  *       200:
  *         description: Wallet deleted successfully
@@ -273,7 +289,7 @@ router.put('/:id', walletController.updateWallet);
  *                   example: true
  *                 message:
  *                   type: string
- *                   example: Wallet deleted successfully
+ *                   example: "Wallet deleted successfully"
  *       401:
  *         description: Unauthorized - Missing or invalid token
  *         content:
@@ -286,11 +302,12 @@ router.put('/:id', walletController.updateWallet);
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
- *             example:
- *               success: false
- *               message: Wallet not found
- *               error:
- *                 code: NOT_FOUND
+ *       429:
+ *         description: Too many requests (max 50 per 15 minutes per user)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 router.delete('/:id', walletController.deleteWallet);
 
