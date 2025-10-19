@@ -1,14 +1,50 @@
-version: '3.8'
-
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: wallet-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-wallet_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-wallet_password}
+      POSTGRES_DB: ${DB_DATABASE:-wallet_management}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-wallet_user} -d ${DB_DATABASE:-wallet_management}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - wallet-network
+
   redis:
     image: redis:7-alpine
-    container_name: wallet-api-redis
+    container_name: wallet-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - wallet-network
 
 volumes:
+  postgres_data:
+    driver: local
   redis_data:
+    driver: local
+
+networks:
+  wallet-network:
+    driver: bridge
