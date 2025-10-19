@@ -2,11 +2,11 @@
 
 A production-ready RESTful API for managing cryptocurrency wallets across multiple blockchains with enterprise-grade security and scalability.
 
-![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)
-![Node.js](https://img.shields.io/badge/Node.js-20+-green)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)
+![Node.js](https://img.shields.io/badge/Node.js-20.14+-green)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue)
 ![Redis](https://img.shields.io/badge/Redis-7-red)
-![Test Coverage](https://img.shields.io/badge/Coverage-61%25-yellow)
+![Test Coverage](https://img.shields.io/badge/Coverage-68%25-yellow)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
@@ -18,33 +18,37 @@ A production-ready RESTful API for managing cryptocurrency wallets across multip
 - ✅ **Real Address Validation**: Blockchain-specific validation algorithms
 - ✅ **Wallet CRUD Operations**: Create, Read, Update, Delete with full REST API
 - ✅ **Advanced Filtering**: Search by blockchain, tag, and pagination support
+- ✅ **Robust Health Checks**: Database and Redis connection monitoring
 
 ### Security & Authentication
 - 🔐 **JWT Authentication**: Access tokens (15 min) + Refresh tokens (7 days)
 - 🔄 **Token Rotation**: Automatic refresh token rotation for enhanced security
 - 🚫 **Token Blacklisting**: Redis-based token invalidation on logout
-- 🛡️ **Intelligent Rate Limiting**: 
-  - Signup: 10 attempts per 15 minutes
-  - Login: 5 attempts per 15 minutes per email
-  - Refresh: 10 attempts per 15 minutes
-- 🔒 **bcrypt Password Hashing**: Industry-standard password encryption
+- 🛡️ **Multi-Layer Rate Limiting**: 
+  - Global: 100 requests per 15 minutes per IP
+  - Signup: 10 attempts per 15 minutes per IP
+  - Login: 5 attempts per 15 minutes per email/IP combination
+  - Refresh: 10 attempts per 15 minutes per IP
+  - Wallets: 50 requests per 15 minutes per authenticated user
+- 🔒 **bcrypt Password Hashing**: Industry-standard password encryption (10 rounds)
 
 ### Developer Experience
 - 📚 **Swagger/OpenAPI Documentation**: Interactive API docs at `/api-docs`
-- 🧪 **Comprehensive Testing**: Unit + Integration tests (56 passing tests)
-- 🐳 **Docker Support**: Containerized development and testing environments
+- 🧪 **Comprehensive Testing**: Unit + Integration tests (95 passing tests)
+- 🐳 **Docker Support**: Multi-stage builds with security best practices
 - 📊 **Structured Logging**: Winston-based logging with rotation
 - ⚡ **TypeScript**: Full type safety and IntelliSense support
+- 🏗️ **Clean Architecture**: Modular design with separation of concerns
 
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 20+
+- Node.js 20.14.0+
+- pnpm 10.10.0+
 - PostgreSQL 16+
 - Redis 7+
-- pnpm (recommended) or npm
 - Docker & Docker Compose (optional but recommended)
 
 ### Installation
@@ -70,6 +74,7 @@ Edit `.env` with your configuration:
 # Server
 PORT=3000
 NODE_ENV=development
+API_PREFIX=/api
 
 # Database
 DB_HOST=localhost
@@ -79,18 +84,27 @@ DB_PASSWORD=your_secure_password
 DB_DATABASE=wallet_management
 
 # Redis
+REDIS_ENABLED=true
 REDIS_HOST=localhost
 REDIS_PORT=6379
+REDIS_PASSWORD=
 
-# JWT (generate secure secrets)
+# JWT (generate secure secrets with: pnpm generate:secrets)
 JWT_SECRET=your_jwt_secret_min_32_chars
 JWT_REFRESH_SECRET=your_refresh_secret_min_32_chars
+JWT_EXPIRES_IN=15m
+JWT_REFRESH_EXPIRES_IN=7d
 
 # Security
 BCRYPT_ROUNDS=10
 
+# Rate Limiting
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX_REQUESTS=100
+
 # Swagger
 SWAGGER_ENABLED=true
+SWAGGER_PATH=/api-docs
 ```
 
 4. **Start with Docker (Recommended):**
@@ -114,6 +128,7 @@ pnpm dev
 
 5. **Access the API:**
 - API Base URL: `http://localhost:3000`
+- Health Check: `http://localhost:3000/health`
 - Swagger Docs: `http://localhost:3000/api-docs`
 
 ---
@@ -123,26 +138,54 @@ pnpm dev
 ### Interactive Documentation
 Visit `http://localhost:3000/api-docs` for full interactive API documentation with **Try it out** functionality.
 
+### Health Check
+```bash
+curl http://localhost:3000/health
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "status": "healthy",
+  "timestamp": "2025-10-19T10:30:00.000Z",
+  "uptime": 123.45,
+  "environment": "development",
+  "version": "1.0.0",
+  "services": {
+    "database": {
+      "status": "connected",
+      "responseTime": 12
+    },
+    "redis": {
+      "status": "connected",
+      "responseTime": 4
+    }
+  },
+  "responseTime": 18
+}
+```
+
 ### Quick API Overview
 
 #### Authentication Endpoints
 
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| POST | `/api/auth/signup` | Register new user | ❌ |
-| POST | `/api/auth/signin` | Sign in | ❌ |
-| POST | `/api/auth/refresh` | Refresh access token | ❌ |
-| POST | `/api/auth/signout` | Sign out (invalidate tokens) | ✅ |
+| Method | Endpoint | Description | Rate Limit | Auth Required |
+|--------|----------|-------------|------------|---------------|
+| POST | `/api/auth/signup` | Register new user | 10/15min | ❌ |
+| POST | `/api/auth/signin` | Sign in | 5/15min per email | ❌ |
+| POST | `/api/auth/refresh` | Refresh access token | 10/15min | ❌ |
+| POST | `/api/auth/signout` | Sign out (invalidate tokens) | - | ✅ |
 
 #### Wallet Endpoints
 
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| GET | `/api/wallets` | Get all wallets (paginated) | ✅ |
-| POST | `/api/wallets` | Create new wallet | ✅ |
-| GET | `/api/wallets/:id` | Get wallet by ID | ✅ |
-| PUT | `/api/wallets/:id` | Update wallet | ✅ |
-| DELETE | `/api/wallets/:id` | Delete wallet | ✅ |
+| Method | Endpoint | Description | Rate Limit | Auth Required |
+|--------|----------|-------------|------------|---------------|
+| GET | `/api/wallets` | Get all wallets (paginated) | 50/15min per user | ✅ |
+| POST | `/api/wallets` | Create new wallet | 50/15min per user | ✅ |
+| GET | `/api/wallets/:id` | Get wallet by ID | 50/15min per user | ✅ |
+| PUT | `/api/wallets/:id` | Update wallet | 50/15min per user | ✅ |
+| DELETE | `/api/wallets/:id` | Delete wallet | 50/15min per user | ✅ |
 
 ### Example Requests
 
@@ -164,13 +207,12 @@ curl -X POST http://localhost:3000/api/auth/signup \
   "data": {
     "user": {
       "id": "123e4567-e89b-12d3-a456-426614174000",
-      "email": "user@example.com",
-      "createdAt": "2025-10-15T10:30:00.000Z",
-      "updatedAt": "2025-10-15T10:30:00.000Z"
+      "email": "user@example.com"
     },
     "token": "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9...",
     "refreshToken": "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9..."
-  }
+  },
+  "timestamp": "2025-10-19T10:30:00.000Z"
 }
 ```
 
@@ -207,9 +249,10 @@ curl -X POST http://localhost:3000/api/wallets \
     "chain": "Ethereum",
     "address": "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
     "tag": "My Main ETH Wallet",
-    "createdAt": "2025-10-15T10:35:00.000Z",
-    "updatedAt": "2025-10-15T10:35:00.000Z"
-  }
+    "createdAt": "2025-10-19T10:35:00.000Z",
+    "updatedAt": "2025-10-19T10:35:00.000Z"
+  },
+  "timestamp": "2025-10-19T10:35:00.000Z"
 }
 ```
 
@@ -229,8 +272,8 @@ curl "http://localhost:3000/api/wallets?chain=Ethereum&page=1&limit=10&search=Ma
       "chain": "Ethereum",
       "address": "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
       "tag": "My Main ETH Wallet",
-      "createdAt": "2025-10-15T10:35:00.000Z",
-      "updatedAt": "2025-10-15T10:35:00.000Z"
+      "createdAt": "2025-10-19T10:35:00.000Z",
+      "updatedAt": "2025-10-19T10:35:00.000Z"
     }
   ],
   "pagination": {
@@ -240,7 +283,8 @@ curl "http://localhost:3000/api/wallets?chain=Ethereum&page=1&limit=10&search=Ma
     "totalPages": 1,
     "hasNext": false,
     "hasPrev": false
-  }
+  },
+  "timestamp": "2025-10-19T10:35:00.000Z"
 }
 ```
 
@@ -299,16 +343,24 @@ pnpm test -- --coverage
 
 ### Test Results
 ```
-Test Suites: 5 passed, 5 total
-Tests:       56 passed, 56 total
-├── Unit Tests: 29 passed
+Test Suites: 6 passed, 6 total
+Tests:       95 passed, 95 total
+├── Unit Tests: 68 passed
+│   ├── Auth Service: 19 tests
+│   ├── Password Utils: 4 tests
+│   ├── JWT Utils: 6 tests
+│   ├── Blockchain Validator: 25 tests
+│   ├── Redis Config: 9 tests
+│   └── Database Config: 15 tests
 └── Integration Tests: 27 passed
+    ├── Auth Endpoints: 11 tests
+    └── Wallet Endpoints: 16 tests
 
-Coverage: 61% overall
-├── Statements: 61.46%
-├── Branches: 34.66%
-├── Functions: 59.7%
-└── Lines: 61.59%
+Coverage: ~68% overall
+├── Statements: 68%
+├── Branches: 35%
+├── Functions: 64%
+└── Lines: 68%
 ```
 
 ---
@@ -317,24 +369,31 @@ Coverage: 61% overall
 ```
 wallet-management-api/
 ├── src/
-│   ├── config/          # Configuration files (DB, Redis, Swagger, etc.)
-│   ├── controllers/     # Route controllers
+│   ├── config/          # Configuration files (DB, Redis, Swagger, Logger)
+│   ├── controllers/     # Route controllers (Auth, Wallet)
 │   ├── dto/             # Data Transfer Objects with validation
-│   ├── middlewares/     # Express middlewares (auth, error handling, etc.)
-│   ├── models/          # TypeORM entities
+│   ├── interfaces/      # TypeScript interfaces
+│   ├── middlewares/     # Express middlewares (auth, error, rate-limit)
+│   ├── models/          # TypeORM entities (User, Wallet)
 │   ├── repositories/    # Database repositories
-│   ├── routes/          # API routes
+│   ├── routes/          # API routes (auth, wallet, health)
 │   ├── services/        # Business logic
-│   ├── utils/           # Utility functions
+│   ├── utils/           # Utility functions (JWT, Password, Errors, ResponseBuilder)
 │   ├── validators/      # Custom validators (blockchain addresses)
 │   ├── app.ts           # Express app configuration
 │   └── server.ts        # Server entry point
 ├── tests/
 │   ├── unit/            # Unit tests
-│   ├── integration/     # Integration tests
-│   └── utils/           # Test utilities
-├── docker-compose.yml   # Docker services
+│   │   ├── config/      # Config tests (Redis, Database)
+│   │   ├── services/    # Service tests (AuthService)
+│   │   ├── utils/       # Utils tests (JWT, Password)
+│   │   └── validators/  # Validator tests (Blockchain)
+│   ├── integration/     # Integration tests (Auth, Wallets)
+│   └── utils/           # Test utilities and helpers
+├── docker-compose.yml   # Docker services (production)
 ├── docker-compose.test.yml # Test environment
+├── Dockerfile           # Multi-stage Docker build
+├── .dockerignore        # Docker ignore file
 ├── jest.config.js       # Jest configuration
 ├── tsconfig.json        # TypeScript configuration
 └── package.json         # Dependencies and scripts
@@ -344,11 +403,11 @@ wallet-management-api/
 
 ## 🐳 Docker Commands
 ```bash
-# Start all services
+# Start all services (PostgreSQL + Redis + API)
 docker-compose up -d
 
 # View logs
-docker-compose logs -f
+docker-compose logs -f api
 
 # Stop services
 docker-compose down
@@ -359,7 +418,7 @@ docker-compose up -d --build
 # Start test environment
 docker-compose -f docker-compose.test.yml up -d
 
-# Clean everything
+# Clean everything (including volumes)
 docker-compose down -v --remove-orphans
 ```
 
@@ -371,11 +430,20 @@ docker-compose down -v --remove-orphans
 pnpm dev              # Start with nodemon (hot reload)
 pnpm build            # Build for production
 pnpm start            # Start production build
+pnpm start:prod       # Start with NODE_ENV=production
 
 # Database
 pnpm migration:generate   # Generate new migration
 pnpm migration:run        # Run pending migrations
 pnpm migration:revert     # Revert last migration
+pnpm migration:show       # Show migration status
+
+# Testing
+pnpm test             # Run all tests
+pnpm test:unit        # Run unit tests
+pnpm test:integration # Run integration tests
+pnpm test:watch       # Run tests in watch mode
+pnpm test:ci          # Run tests in CI environment
 
 # Code Quality
 pnpm lint             # Run ESLint
@@ -384,6 +452,7 @@ pnpm type-check       # TypeScript type checking
 
 # Security
 pnpm security:audit   # Run security audit
+pnpm generate:secrets # Generate JWT secrets
 ```
 
 ---
@@ -405,28 +474,31 @@ pnpm security:audit   # Run security audit
 
 This API implements industry-standard security measures:
 
-- ✅ **Password Hashing**: bcrypt with configurable rounds
-- ✅ **JWT Tokens**: HS512 algorithm with expiration
-- ✅ **Refresh Token Rotation**: One-time use refresh tokens
-- ✅ **Token Blacklisting**: Immediate invalidation on logout
-- ✅ **Rate Limiting**: Protection against brute-force attacks
+- ✅ **Password Hashing**: bcrypt with 10 rounds (configurable)
+- ✅ **JWT Tokens**: HS512 algorithm with short expiration (15 min)
+- ✅ **Refresh Token Rotation**: One-time use refresh tokens with 7-day expiration
+- ✅ **Token Blacklisting**: Redis-based immediate invalidation on logout
+- ✅ **Multi-Layer Rate Limiting**: IP, email, and user-based protection
 - ✅ **Input Validation**: class-validator for all DTOs
 - ✅ **SQL Injection Protection**: TypeORM parameterized queries
 - ✅ **CORS**: Configurable origin restrictions
-- ✅ **Helmet**: Security headers
-- ✅ **Environment Variables**: Sensitive data in `.env`
+- ✅ **Helmet**: Security headers (CSP, HSTS, etc.)
+- ✅ **Environment Variables**: Validated with envalid
+- ✅ **Health Monitoring**: Database and Redis connection checks
 
 ---
 
 ## 📊 Architecture & Design Patterns
 
-- **MVC Pattern**: Controllers, Services, Repositories separation
+- **Clean Architecture**: Separation of concerns with clear boundaries
 - **Repository Pattern**: Data access abstraction
-- **DTO Pattern**: Request/Response validation
+- **DTO Pattern**: Request/Response validation and transformation
+- **Service Layer Pattern**: Business logic encapsulation
 - **Dependency Injection**: Loose coupling between layers
-- **Error Handling**: Centralized custom error classes
-- **Logging**: Structured logging with Winston
-- **Testing**: Unit + Integration + E2E coverage
+- **Error Handling**: Centralized error middleware with custom error classes
+- **Response Builder**: Consistent API response format
+- **Logging**: Structured logging with Winston (daily rotation)
+- **Testing**: Comprehensive unit and integration test coverage
 
 ---
 
@@ -492,6 +564,9 @@ docker-compose ps
 # Check connection settings in .env
 cat .env | grep DB_
 
+# View PostgreSQL logs
+docker-compose logs postgres
+
 # Restart database
 docker-compose restart postgres
 ```
@@ -503,6 +578,9 @@ docker-compose ps
 
 # Test Redis connection
 docker-compose exec redis redis-cli ping
+
+# View Redis logs
+docker-compose logs redis
 
 # Restart Redis
 docker-compose restart redis
@@ -522,6 +600,9 @@ PORT=3001
 
 #### 4. Migration Errors
 ```bash
+# Show migration status
+pnpm migration:show
+
 # Drop database and recreate
 docker-compose down -v
 docker-compose up -d
@@ -535,7 +616,38 @@ pnpm generate:secrets
 
 # Update .env with new secrets
 # Restart server
+pnpm dev
 ```
+
+#### 6. Tests Failing
+```bash
+# Ensure test database is running
+pnpm test:docker:up
+
+# Run tests
+pnpm test
+
+# Clean up
+pnpm test:docker:down
+```
+
+---
+
+## 🔒 Security Notes
+
+This project uses Docker multi-stage builds with security best practices:
+- Non-root user execution
+- Minimal production dependencies  
+- Regular base image updates
+- dumb-init for proper signal handling
+
+**Known Vulnerabilities:** The base Node.js image may report CVEs from automated scanners. These are tracked by the Node.js Security Team and are not exploitable in this application's HTTP API context. For production deployment, consider using Google Distroless images or implement continuous container scanning with Trivy/Snyk.
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ---
 
